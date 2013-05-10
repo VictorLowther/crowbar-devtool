@@ -19,11 +19,20 @@ func show_cmd() *commander.Command {
 	return cmd
 }
 
+func fetch_cmd() *commander.Command {
+	return &commander.Command{
+		Run: devtool.Fetch,
+		UsageLine: "fetch",
+		Short: "Fetches updates from all remotes",
+	}
+}
+
 func init() {
 	commands = &commander.Commander{
 		Name: "dev",
 		Commands: []*commander.Command{
 			show_cmd(),
+			fetch_cmd(),
 		},
 		Flag: flag.NewFlagSet("dev", flag.ExitOnError),
 	}
