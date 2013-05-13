@@ -1,6 +1,7 @@
 package devtool
 
 import (
+	"errors"
 	"fmt"
 	"github.com/VictorLowther/crowbar-devtool/commands"
 	"github.com/VictorLowther/go-git/git"
@@ -10,7 +11,6 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
-	"errors"
 )
 
 type Remote struct {
@@ -22,13 +22,43 @@ type Crowbar struct {
 	Repo      *git.Repo
 	Barclamps map[string]*git.Repo
 	Remotes   map[string]*Remote
+	Meta *Metadata
+}
+
+type Barclamp struct {
+	Name, Branch string
+	Repo         *git.Repo
+}
+
+type BarclampMap map[string]*Barclamp
+
+type Build interface {
+	Name() (string)
+	Release() (Release,error)
+	Barclamps() (BarclampMap,error)
+	Parent() (Build,error)
+}
+
+type BuildMap map[string]Build
+
+type Release interface {
+	Name() (string)
+	Builds() (BuildMap,error)
+	Parent() (Release,error)
+}
+
+type ReleaseMap map[string]Release
+
+type Metadata interface {
+	Releases() (ReleaseMap,error)
+	Probe(*Crowbar) (error)
 }
 
 var MemoCrowbar *Crowbar
 
-func findCrowbar(path string) (res *Crowbar,err error) {
+func findCrowbar(path string) (res *Crowbar, err error) {
 	if MemoCrowbar != nil {
-		return MemoCrowbar,nil
+		return MemoCrowbar, nil
 	}
 	if path == "" {
 		path, err = os.Getwd()
@@ -42,7 +72,7 @@ func findCrowbar(path string) (res *Crowbar,err error) {
 	}
 	repo, err := git.Open(path)
 	if err != nil {
-		return nil,errors.New("Cannot find Crowbar")
+		return nil, errors.New("Cannot find Crowbar")
 	}
 	path = repo.Path()
 	parent := filepath.Dir(path)
@@ -54,7 +84,7 @@ func findCrowbar(path string) (res *Crowbar,err error) {
 	// See if we have something that looks like a crowbar repo here.
 	stat, err := os.Stat(filepath.Join(path, "barclamps"))
 	if err != nil || !stat.IsDir() {
-		res,err = findCrowbar(parent)
+		res, err = findCrowbar(parent)
 		return
 	}
 	// We do.  Populate the crowbar struct.
@@ -109,7 +139,7 @@ func findCrowbar(path string) (res *Crowbar,err error) {
 		}
 	}
 	MemoCrowbar = res
-	return res,nil
+	return res, nil
 }
 
 func ShowCrowbar(cmd *commander.Command, args []string) {
@@ -174,7 +204,7 @@ func (c *Crowbar) fetch(remotes []string) (ok bool) {
 }
 
 func Fetch(cmd *commander.Command, args []string) {
-	c,err := findCrowbar("")
+	c, err := findCrowbar("")
 	if err != nil {
 		fmt.Println(err)
 		os.Exit(1)
