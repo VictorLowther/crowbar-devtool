@@ -30,6 +30,8 @@ type Barclamp struct {
 
 type BarclampMap map[string]*Barclamp
 
+type RepoMap map[string]*git.Repo
+
 // A Build is a bundle of barclamps in a release that
 // constitute an installable version of Crowbar
 // with an addtional deliverable.
@@ -212,51 +214,83 @@ func (c *Crowbar) Release(release string) Release {
 
 func ShowCrowbar(cmd *commander.Command, args []string) {
 	r := mustFindCrowbar("")
-	fmt.Printf("Crowbar is located at: %s\n", r.Repo.Path())
+	log.Printf("Crowbar is located at: %s\n", r.Repo.Path())
 }
 
-func (c *Crowbar) fetch(remotes []string) (ok bool) {
-	type tok struct {
-		name    string
-		ok      bool
-		results git.FetchMap
+func (c *Crowbar) AllBarclampRepos() (res RepoMap) {
+	res = make(RepoMap)
+	for name,bc := range c.Barclamps {
+		res["barclamp-"+name]=bc
 	}
-	ok = true
-	fetches := len(c.Barclamps) + 1
-	results := make([]tok, 0, fetches)
-	ch := make(chan tok)
-	fetcher := func(name string, repo *git.Repo) {
-		ok, items := repo.Fetch(remotes)
-		ch <- tok{
-			name:    name,
-			ok:      ok,
+	return res
+}
+
+func (c *Crowbar) AllRepos() (res RepoMap) {
+	res = c.AllBarclampRepos()
+	res["Crowbar"] = c.Repo
+	return res
+}
+
+type resultToken struct {
+	name string
+	ok bool
+	results interface{}
+}
+
+type resultTokens []*resultToken
+
+type resultChan chan *resultToken
+
+type repoMapper func (string, *git.Repo, resultChan)
+
+type repoReducer func (resultChan) (bool, resultTokens)
+
+func repoMapReduce(repos RepoMap, mapper repoMapper, reducer repoReducer) (ok bool, res resultTokens) {
+	results := make(resultChan)
+	defer close(results)
+	for name,repo := range repos {
+		go mapper(name,repo,results)
+	}
+	ok,res = reducer(results)
+	return ok, res
+}
+
+func (c *Crowbar) fetch(remotes []string) (ok bool, results resultTokens) {
+	repos := c.AllRepos()
+	mapper := func (name string, repo *git.Repo, res resultChan) {
+		ok,items := repo.Fetch(remotes)
+		res <- &resultToken{
+			name: name,
+			ok: ok,
 			results: items,
 		}
 	}
-	go fetcher("Crowbar", c.Repo)
-	for k, v := range c.Barclamps {
-		go fetcher(k, v)
-	}
-	for {
-		result := <-ch
-		ok = ok && result.ok
-		results = append(results, result)
-		if result.ok {
-			fmt.Printf("Fetched all changes for %s\n", result.name)
-		} else {
-			fmt.Printf("Failed to fetch all changes for %s:\n", result.name)
-			for k, v := range result.results {
-				if !v {
-					fmt.Printf("\tRemote %s failed\n", k)
+	reducer := func (vals resultChan) (bool, resultTokens) {
+		ok := true
+		res := make(resultTokens,len(repos),len(repos))
+		for i,_ := range res {
+			item := <- vals
+			res[i] = item
+			if item.ok {
+				log.Printf("Fetched all updates for %s\n",item.name)
+			} else {
+				log.Printf("Failed to fetch all changes for %s:\n", item.name)
+				fetch_results,cast_ok := item.results.(git.FetchMap)
+				if ! cast_ok {
+					log.Panicf("Could not cast fetch results for %s into git.FetchMap\n",item.name)
+				} 
+				for k, v := range fetch_results {
+					if !v {
+						log.Printf("\tRemote %s failed\n", k)
+					}
 				}
 			}
+			ok = ok && res[i].ok
 		}
-		if len(results) == fetches {
-			break
-		}
+		return ok, res
 	}
-	close(ch)
-	return ok
+	ok, results = repoMapReduce(repos,mapper,reducer)
+	return
 }
 
 func (c *Crowbar) currentRelease() Release {
@@ -302,8 +336,9 @@ func (c *Crowbar) barclampsInBuild(build Build) BarclampMap {
 
 func Fetch(cmd *commander.Command, args []string) {
 	c := mustFindCrowbar("")
-	if c.fetch(nil) {
-		fmt.Printf("All updates fetched.\n")
+	ok, _ := c.fetch(nil)
+	if ok {
+		log.Printf("All updates fetched.\n")
 		os.Exit(0)
 	}
 	os.Exit(1)
