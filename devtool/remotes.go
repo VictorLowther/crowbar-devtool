@@ -131,6 +131,9 @@ func validateRemote(remote *Remote) (bool) {
 }
 
 func (c *Crowbar) AddRemote(remote *Remote) {
+	if !validateRemote(remote) {
+		log.Fatalf("%s failed validation.",remote.Name)
+	}
 	if c.Remotes[remote.Name] != nil {
 		log.Panicf("Already have a remote named%s\n",remote.Name)
 	}
@@ -176,9 +179,6 @@ func AddRemote(cmd *commander.Command, args []string) {
 			log.Fatalf("Last argument must be a number, but you passed %v\n",args[2])
 		}
 	default: log.Fatalf("Adding a remote takes at least 1 and most 3 parameters!")
-	}
-	if !validateRemote(remote) {
-		log.Fatalf("%s failed validation.",remote.Name)
 	}
 	c := mustFindCrowbar("")
 	if c.Remotes[remote.Name] != nil {
