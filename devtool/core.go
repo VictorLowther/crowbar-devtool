@@ -263,10 +263,18 @@ func (c *Crowbar) AllBarclampRepos() (res RepoMap) {
 	return res
 }
 
+func (c *Crowbar) AllOtherRepos() (res RepoMap) {
+	res = make(RepoMap)
+	res["crowbar"] = c.Repo
+	return res
+}
+
 // Get all of the repositories that make up Crowbar.
 func (c *Crowbar) AllRepos() (res RepoMap) {
 	res = c.AllBarclampRepos()
-	res["Crowbar"] = c.Repo
+	for k,v := range c.AllOtherRepos() {
+		res[k]=v
+	}
 	return res
 }
 
