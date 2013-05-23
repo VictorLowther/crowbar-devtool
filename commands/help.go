@@ -1,38 +1,48 @@
 package commands
 
 import (
+	"fmt"
 	"github.com/gonuts/commander"
 	"github.com/gonuts/flag"
 	"os"
-	"fmt"
 )
 
-var r *commander.Commander
+var base_command *commander.Commander
 
 func init() {
-	r = &commander.Commander{
+	base_command = &commander.Commander{
 		Name: "dev",
 		Flag: flag.NewFlagSet("dev", flag.ExitOnError),
 	}
 }
 
-func AddCommand(cmd *commander.Command) {
-	r.Commands = append(r.Commands,cmd)
+func AddCommand(parent *commander.Commander, cmd *commander.Command) {
+	if parent == nil {
+		parent = base_command
+	}
+	parent.Commands = append(parent.Commands, cmd)
 	return
 }
 
-func AddSubCommand(subcmd *commander.Commander) {
-	r.Commanders = append(r.Commanders,subcmd)
+func AddSubCommand(parent *commander.Commander, subcmd *commander.Commander) *commander.Commander {
+	if parent == nil {
+		parent = base_command
+	}
+	subcmd.Parent = parent
+	subcmd.Commands = make([]*commander.Command, 0, 2)
+	subcmd.Commanders = make([]*commander.Commander, 0, 1)
+	parent.Commanders = append(parent.Commanders, subcmd)
+	return subcmd
 }
 
 func Run() {
-	err := r.Flag.Parse(os.Args[1:])
+	err := base_command.Flag.Parse(os.Args[1:])
 	if err != nil {
 		fmt.Printf("**err**: %v\n", err)
 		os.Exit(1)
 	}
-	args := r.Flag.Args()
-	err = r.Run(args)
+	args := base_command.Flag.Args()
+	err = base_command.Run(args)
 	if err != nil {
 		fmt.Printf("**err**: %v\n", err)
 		os.Exit(1)
