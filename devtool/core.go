@@ -84,26 +84,32 @@ type Metadata interface {
 	Probe(*Crowbar) error
 }
 
+// Track the priority of a Crowbar remote.
 type Remote struct {
 	Priority int
-	Urlbase  string
+	Urlbase, Name string
 }
 
+// The master struct for managing Crowbar instances.
 type Crowbar struct {
 	Repo      *git.Repo
-	Barclamps map[string]*git.Repo
+	Barclamps RepoMap
 	Remotes   map[string]*Remote
 	Meta      Metadata
 }
 
+// The current instance of Crowbar we operate on.
 var MemoCrowbar *Crowbar
 
+// If e is of type error, log it as a fatal error and die.
+// Otherwise, don't do anything.
 func dieIfError(e error) {
 	if e != nil {
-		log.Panic(e)
+		log.Fatal(e)
 	}
 }
 
+// Find Crowbar from the current path.
 func findCrowbar(path string) (res *Crowbar, err error) {
 	if MemoCrowbar != nil {
 		return MemoCrowbar, nil
@@ -161,21 +167,25 @@ func findCrowbar(path string) (res *Crowbar, err error) {
 		res.Barclamps[bc.Name()] = repo
 	}
 	// populate remotes next
-	cfg, err := res.Repo.Config()
-	dieIfError(err)
-	remotes := cfg.Find("crowbar.remote.")
+	
+	remotes := res.Repo.Find("crowbar.remote.")
 	var rem *Remote
 	for k, v := range remotes {
 		parts := strings.Split(k, ".")
 		if res.Remotes[parts[2]] == nil {
 			rem = new(Remote)
+			rem.Name = parts[2]
+			rem.Priority = 50 // default.
 			res.Remotes[parts[2]] = rem
 		} else {
 			rem = res.Remotes[parts[2]]
 		}
 		switch parts[3] {
 		case "priority":
-			rem.Priority, _ = strconv.Atoi(v)
+			p,e := strconv.Atoi(v)
+			if e == nil {
+				rem.Priority = p
+			}
 		case "urlbase":
 			rem.Urlbase = v
 		}
@@ -189,20 +199,24 @@ func findCrowbar(path string) (res *Crowbar, err error) {
 	return res, nil
 }
 
+// This is the same as findCrowbar, except we die if we cannot find Crowbar.
 func mustFindCrowbar(path string) *Crowbar {
 	res, err := findCrowbar(path)
 	dieIfError(err)
 	return res
 }
 
+// Get all the releases we know about.
 func (c *Crowbar) Releases() ReleaseMap {
 	return c.Meta.Releases()
 }
 
+// Get all of the builds we know how to build.
 func (c *Crowbar) Builds() BuildMap {
 	return c.Meta.AllBuilds()
 }
 
+// Get a specific release.
 func (c *Crowbar) Release(release string) Release {
 	rels := c.Releases()
 	res, ok := rels[release]
@@ -212,73 +226,126 @@ func (c *Crowbar) Release(release string) Release {
 	return res
 }
 
-func ShowCrowbar(cmd *commander.Command, args []string) {
-	r := mustFindCrowbar("")
-	log.Printf("Crowbar is located at: %s\n", r.Repo.Path())
+// Given the name of a release, return what its git branch should be.
+func (c *Crowbar) ReleaseBranch(release string) string {
+	parts := strings.Split(release,"/")
+	if len(parts) == 1 {
+		return "release/" + release + "/master"
+	} else if len(parts) == 2 && parts[0] == "feature" {
+		return "feature/" + parts[1] + "/master"
+	} else {
+		log.Fatalf("%s is not a valid release name!\n",release)
+	}
+	return ""
 }
 
+// Get all the release branches we care about, sorted by barclamp.
+func (c *Crowbar) AllBarclampBranches() (res map[string][]string) {
+	res = make(map[string][]string)
+	for _,build := range c.Builds() {
+		for _,bc := range build.Barclamps() {
+			if res[bc.Name] == nil {
+				res[bc.Name] = make([]string,0,4)
+			}
+			res[bc.Name] = append(res[bc.Name],bc.Branch)
+		}
+	}
+	return
+}
+
+// Get all the barclamp repos, return them in a map whose keys are in the
+// of "barclamp-" + the barclamp name.
 func (c *Crowbar) AllBarclampRepos() (res RepoMap) {
 	res = make(RepoMap)
-	for name,bc := range c.Barclamps {
-		res["barclamp-"+name]=bc
+	for name, bc := range c.Barclamps {
+		res["barclamp-"+name] = bc
 	}
 	return res
 }
 
+// Get all of the repositories that make up Crowbar.
 func (c *Crowbar) AllRepos() (res RepoMap) {
 	res = c.AllBarclampRepos()
 	res["Crowbar"] = c.Repo
 	return res
 }
 
+// The result type that all mappers in the repoMapReduce framework expect.
 type resultToken struct {
+	// name should be unique among all the mapreduce operations.
+	// It will usually be the name of a barclamp or other repository.
 	name string
+	// true if the map operations results are valid, false otherwise.
+	// We split this out because I expect that most operations will
+	// care about rolling this up.
 	ok bool
+	// The detailed result of an individual map function.
+	// The framework will treat this as an opaque token.
 	results interface{}
 }
 
+// A slice of pointers to result tokens.
 type resultTokens []*resultToken
 
+// A channel for passing result tokens around.
 type resultChan chan *resultToken
 
-type repoMapper func (string, *git.Repo, resultChan)
+// The function signature that a mapper function must have.
+// string should be a unique name that should be derived from the name of a
+//   repository in some way.
+// *git.Repo is a pointer to a git repository structure.
+// resultChan is the channel that the mapper should put its resultToken on.
+type repoMapper func(string, *git.Repo, resultChan)
 
-type repoReducer func (resultChan) (bool, resultTokens)
+// The function signature that a reducer must have. It should loop over
+// the values it gets from resultChan, evaluate overall success or failure,
+// and return the overall success or failure along with an array of all the results.
+type repoReducer func(resultChan) (bool, resultTokens)
 
+// Perform operations in parallel across the repositories and collect the results.
 func repoMapReduce(repos RepoMap, mapper repoMapper, reducer repoReducer) (ok bool, res resultTokens) {
 	results := make(resultChan)
 	defer close(results)
-	for name,repo := range repos {
-		go mapper(name,repo,results)
+	for name, repo := range repos {
+		go mapper(name, repo, results)
 	}
-	ok,res = reducer(results)
+	ok, res = reducer(results)
 	return ok, res
 }
 
+// Perform a git fetch across all the repositories.
 func (c *Crowbar) fetch(remotes []string) (ok bool, results resultTokens) {
 	repos := c.AllRepos()
-	mapper := func (name string, repo *git.Repo, res resultChan) {
-		ok,items := repo.Fetch(remotes)
+	// mapper and reducer are the functions we will
+	// hand over to repoMapReduce.
+	// mapper is pretty simple, and doesn't really demonstrate
+	// anything useful.
+	mapper := func(name string, repo *git.Repo, res resultChan) {
+		ok, items := repo.Fetch(remotes)
 		res <- &resultToken{
-			name: name,
-			ok: ok,
+			name:    name,
+			ok:      ok,
 			results: items,
 		}
 	}
-	reducer := func (vals resultChan) (bool, resultTokens) {
+	// reducer iterates over all the results as they arrive,
+	// printing status messages along the way and keeping
+	// a running idea about which fetches worked.
+	// It also serves to show off variable capture.
+	reducer := func(vals resultChan) (bool, resultTokens) {
 		ok := true
-		res := make(resultTokens,len(repos),len(repos))
-		for i,_ := range res {
-			item := <- vals
+		res := make(resultTokens, len(repos), len(repos))
+		for i, _ := range res {
+			item := <-vals
 			res[i] = item
 			if item.ok {
-				log.Printf("Fetched all updates for %s\n",item.name)
+				log.Printf("Fetched all updates for %s\n", item.name)
 			} else {
 				log.Printf("Failed to fetch all changes for %s:\n", item.name)
-				fetch_results,cast_ok := item.results.(git.FetchMap)
-				if ! cast_ok {
-					log.Panicf("Could not cast fetch results for %s into git.FetchMap\n",item.name)
-				} 
+				fetch_results, cast_ok := item.results.(git.FetchMap)
+				if !cast_ok {
+					log.Panicf("Could not cast fetch results for %s into git.FetchMap\n", item.name)
+				}
 				for k, v := range fetch_results {
 					if !v {
 						log.Printf("\tRemote %s failed\n", k)
@@ -289,14 +356,38 @@ func (c *Crowbar) fetch(remotes []string) (ok bool, results resultTokens) {
 		}
 		return ok, res
 	}
-	ok, results = repoMapReduce(repos,mapper,reducer)
+	// Now that all the setup is done, do it!
+	ok, results = repoMapReduce(repos, mapper, reducer)
+	c.updateTrackingBranches()
+	return
+}
+
+func (c *Crowbar) is_clean() (ok bool, results resultTokens) {
+	repos := c.AllRepos()
+	mapper := func(name string, repo *git.Repo, res resultChan) {
+		ok, items := repo.IsClean()
+		res <- &resultToken{
+			name:    name,
+			ok:      ok,
+			results: items,
+		}
+	}
+	reducer := func(vals resultChan) (bool, resultTokens) {
+		ok := true
+		res := make(resultTokens, len(repos), len(repos))
+		for i, _ := range res {
+			item := <-vals
+			res[i] = item
+			ok = ok && item.ok
+		}
+		return ok, res
+	}
+	ok, results = repoMapReduce(repos, mapper, reducer)
 	return
 }
 
 func (c *Crowbar) currentRelease() Release {
-	cfg, err := c.Repo.Config()
-	dieIfError(err)
-	res, found := cfg.Get("crowbar.release")
+	res, found := c.Repo.Get("crowbar.release")
 	if found {
 		return c.Release(res)
 	}
@@ -304,9 +395,7 @@ func (c *Crowbar) currentRelease() Release {
 }
 
 func (c *Crowbar) currentBuild() Build {
-	cfg, err := c.Repo.Config()
-	dieIfError(err)
-	res, found := cfg.Get("crowbar.build")
+	res, found := c.Repo.Get("crowbar.build")
 	if !found {
 		return nil
 	}
@@ -334,6 +423,11 @@ func (c *Crowbar) barclampsInBuild(build Build) BarclampMap {
 	return res
 }
 
+func ShowCrowbar(cmd *commander.Command, args []string) {
+	r := mustFindCrowbar("")
+	log.Printf("Crowbar is located at: %s\n", r.Repo.Path())
+}
+
 func Fetch(cmd *commander.Command, args []string) {
 	c := mustFindCrowbar("")
 	ok, _ := c.fetch(nil)
@@ -342,6 +436,25 @@ func Fetch(cmd *commander.Command, args []string) {
 		os.Exit(0)
 	}
 	os.Exit(1)
+}
+
+func IsClean(cmd *commander.Command, args []string) {
+	c := mustFindCrowbar("")
+	ok, items := c.is_clean()
+	if ok {
+		log.Println("All Crowbar repositories are clean.")
+		os.Exit(0)
+	}
+	for _,item := range items {
+		if !item.ok {
+			log.Printf("%s is not clean:\n", item.name)
+			for _, line := range item.results.(git.StatLines) {
+				log.Printf("\t%s\n",line.Print())
+			}
+		}
+	}
+	os.Exit(1)
+	return
 }
 
 func ShowRelease(cmd *commander.Command, args []string) {
@@ -410,44 +523,42 @@ func BarclampsInBuild(cmd *commander.Command, args []string) {
 }
 
 func init() {
-	commands.AddCommand(
-		&commander.Command{
+	commands.AddCommand(nil, &commander.Command{
+			Run:       IsClean,
+			UsageLine: "clean?",
+			Short:     "Shows whether Crowbar overall is clean.",
+		})
+	commands.AddCommand(nil, &commander.Command{
 			Run:       Releases,
 			UsageLine: "releases",
 			Short:     "Shows the releases available to work on.",
 		})
-	commands.AddCommand(
-		&commander.Command{
+	commands.AddCommand(nil, &commander.Command{
 			Run:       BarclampsInBuild,
 			UsageLine: "barclamps-in-build [build]",
 			Short:     "Shows the releases available to work on.",
 		})
-	commands.AddCommand(
-		&commander.Command{
+	commands.AddCommand(nil, &commander.Command{
 			Run:       Builds,
 			UsageLine: "builds",
 			Short:     "Shows the builds in a release or releases.",
 		})
-	commands.AddCommand(
-		&commander.Command{
+	commands.AddCommand(nil, &commander.Command{
 			Run:       ShowRelease,
 			UsageLine: "release",
 			Short:     "Shows the current release",
 		})
-	commands.AddCommand(
-		&commander.Command{
+	commands.AddCommand(nil, &commander.Command{
 			Run:       ShowBuild,
 			UsageLine: "branch",
 			Short:     "Shows the current branch",
 		})
-	commands.AddCommand(
-		&commander.Command{
+	commands.AddCommand(nil, &commander.Command{
 			Run:       ShowCrowbar,
 			UsageLine: "show",
 			Short:     "Shows the location of the top level Crowbar repo",
 		})
-	commands.AddCommand(
-		&commander.Command{
+	commands.AddCommand(nil, &commander.Command{
 			Run:       Fetch,
 			UsageLine: "fetch",
 			Short:     "Fetches updates from all remotes",
