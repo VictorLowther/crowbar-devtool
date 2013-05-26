@@ -86,7 +86,7 @@ type Metadata interface {
 
 // Track the priority of a Crowbar remote.
 type Remote struct {
-	Priority int
+	Priority      int
 	Urlbase, Name string
 }
 
@@ -167,7 +167,7 @@ func findCrowbar(path string) (res *Crowbar, err error) {
 		res.Barclamps[bc.Name()] = repo
 	}
 	// populate remotes next
-	
+
 	remotes := res.Repo.Find("crowbar.remote.")
 	var rem *Remote
 	for k, v := range remotes {
@@ -182,7 +182,7 @@ func findCrowbar(path string) (res *Crowbar, err error) {
 		}
 		switch parts[3] {
 		case "priority":
-			p,e := strconv.Atoi(v)
+			p, e := strconv.Atoi(v)
 			if e == nil {
 				rem.Priority = p
 			}
@@ -228,13 +228,13 @@ func (c *Crowbar) Release(release string) Release {
 
 // Given the name of a release, return what its git branch should be.
 func (c *Crowbar) ReleaseBranch(release string) string {
-	parts := strings.Split(release,"/")
+	parts := strings.Split(release, "/")
 	if len(parts) == 1 {
 		return "release/" + release + "/master"
 	} else if len(parts) == 2 && parts[0] == "feature" {
 		return "feature/" + parts[1] + "/master"
 	} else {
-		log.Fatalf("%s is not a valid release name!\n",release)
+		log.Fatalf("%s is not a valid release name!\n", release)
 	}
 	return ""
 }
@@ -242,12 +242,12 @@ func (c *Crowbar) ReleaseBranch(release string) string {
 // Get all the release branches we care about, sorted by barclamp.
 func (c *Crowbar) AllBarclampBranches() (res map[string][]string) {
 	res = make(map[string][]string)
-	for _,build := range c.Builds() {
-		for _,bc := range build.Barclamps() {
+	for _, build := range c.Builds() {
+		for _, bc := range build.Barclamps() {
 			if res[bc.Name] == nil {
-				res[bc.Name] = make([]string,0,4)
+				res[bc.Name] = make([]string, 0, 4)
 			}
-			res[bc.Name] = append(res[bc.Name],bc.Branch)
+			res[bc.Name] = append(res[bc.Name], bc.Branch)
 		}
 	}
 	return
@@ -272,8 +272,8 @@ func (c *Crowbar) AllOtherRepos() (res RepoMap) {
 // Get all of the repositories that make up Crowbar.
 func (c *Crowbar) AllRepos() (res RepoMap) {
 	res = c.AllBarclampRepos()
-	for k,v := range c.AllOtherRepos() {
-		res[k]=v
+	for k, v := range c.AllOtherRepos() {
+		res[k] = v
 	}
 	return res
 }
@@ -287,9 +287,25 @@ type resultToken struct {
 	// We split this out because I expect that most operations will
 	// care about rolling this up.
 	ok bool
+	// A function that will be called to commit this result in the
+	// case that all the results are OK.
+	commit func(chan<- bool)
+	// A function that will be called to roll back any changes this result make.
+	// It will be called if any of the mapped results were not OK.
+	rollback func(chan<- bool)
 	// The detailed result of an individual map function.
 	// The framework will treat this as an opaque token.
 	results interface{}
+}
+
+// Make a default resultToken.
+// It pre-populates commit and rollback with functions that do nothing.
+func makeResultToken() (res *resultToken) {
+	res = &resultToken{
+		commit:   func(c chan<- bool) { c <- true },
+		rollback: func(c chan<- bool) { c <- true },
+	}
+	return
 }
 
 // A slice of pointers to result tokens.
@@ -303,6 +319,8 @@ type resultChan chan *resultToken
 //   repository in some way.
 // *git.Repo is a pointer to a git repository structure.
 // resultChan is the channel that the mapper should put its resultToken on.
+// repoMapper must populate the commit and rollback functions in the resultToken,
+// although they can be functions that do nothing.
 type repoMapper func(string, *git.Repo, resultChan)
 
 // The function signature that a reducer must have. It should loop over
@@ -311,6 +329,8 @@ type repoMapper func(string, *git.Repo, resultChan)
 type repoReducer func(resultChan) (bool, resultTokens)
 
 // Perform operations in parallel across the repositories and collect the results.
+// If all the results are OK, then the commit function of each resultToken is called,
+// otherwise the rollback function of each resultToken is called.
 func repoMapReduce(repos RepoMap, mapper repoMapper, reducer repoReducer) (ok bool, res resultTokens) {
 	results := make(resultChan)
 	defer close(results)
@@ -318,6 +338,29 @@ func repoMapReduce(repos RepoMap, mapper repoMapper, reducer repoReducer) (ok bo
 		go mapper(name, repo, results)
 	}
 	ok, res = reducer(results)
+	crChan := make(chan bool)
+	defer close(crChan)
+	crOK := true
+	for _, t := range res {
+		if ok {
+			go t.commit(crChan)
+		} else {
+			go t.rollback(crChan)
+		}
+	}
+	for _, _ = range res {
+		crOK = (<-crChan) && crOK
+	}
+	if !crOK {
+		var cr string
+		if ok {
+			cr = "commit"
+		} else {
+			cr = "rollback"
+		}
+		log.Printf("Please email this traceback to crowbar@lists.us.dell.com\n")
+		log.Panicf("Unable to %s all repoMapReduce operations!\n", cr)
+	}
 	return ok, res
 }
 
@@ -329,12 +372,11 @@ func (c *Crowbar) fetch(remotes []string) (ok bool, results resultTokens) {
 	// mapper is pretty simple, and doesn't really demonstrate
 	// anything useful.
 	mapper := func(name string, repo *git.Repo, res resultChan) {
+		tok := makeResultToken()
 		ok, items := repo.Fetch(remotes)
-		res <- &resultToken{
-			name:    name,
-			ok:      ok,
-			results: items,
-		}
+		// Since you cannot unwind a fetch, use the default commit/rollback functions.
+		tok.name, tok.ok, tok.results = name, ok, items
+		res <- tok
 	}
 	// reducer iterates over all the results as they arrive,
 	// printing status messages along the way and keeping
@@ -374,11 +416,11 @@ func (c *Crowbar) is_clean() (ok bool, results resultTokens) {
 	repos := c.AllRepos()
 	mapper := func(name string, repo *git.Repo, res resultChan) {
 		ok, items := repo.IsClean()
-		res <- &resultToken{
-			name:    name,
-			ok:      ok,
-			results: items,
-		}
+		tok := makeResultToken()
+		// There is nothing to unwind or rollback when testing to see
+		// if things are clean.
+		tok.name, tok.ok, tok.results = name, ok, items
+		res <- tok
 	}
 	reducer := func(vals resultChan) (bool, resultTokens) {
 		ok := true
@@ -453,11 +495,11 @@ func IsClean(cmd *commander.Command, args []string) {
 		log.Println("All Crowbar repositories are clean.")
 		os.Exit(0)
 	}
-	for _,item := range items {
+	for _, item := range items {
 		if !item.ok {
 			log.Printf("%s is not clean:\n", item.name)
 			for _, line := range item.results.(git.StatLines) {
-				log.Printf("\t%s\n",line.Print())
+				log.Printf("\t%s\n", line.Print())
 			}
 		}
 	}
@@ -532,45 +574,45 @@ func BarclampsInBuild(cmd *commander.Command, args []string) {
 
 func init() {
 	commands.AddCommand(nil, &commander.Command{
-			Run:       IsClean,
-			UsageLine: "clean?",
-			Short:     "Shows whether Crowbar overall is clean.",
-		})
+		Run:       IsClean,
+		UsageLine: "clean?",
+		Short:     "Shows whether Crowbar overall is clean.",
+	})
 	commands.AddCommand(nil, &commander.Command{
-			Run:       Releases,
-			UsageLine: "releases",
-			Short:     "Shows the releases available to work on.",
-		})
+		Run:       Releases,
+		UsageLine: "releases",
+		Short:     "Shows the releases available to work on.",
+	})
 	commands.AddCommand(nil, &commander.Command{
-			Run:       BarclampsInBuild,
-			UsageLine: "barclamps-in-build [build]",
-			Short:     "Shows the releases available to work on.",
-		})
+		Run:       BarclampsInBuild,
+		UsageLine: "barclamps-in-build [build]",
+		Short:     "Shows the releases available to work on.",
+	})
 	commands.AddCommand(nil, &commander.Command{
-			Run:       Builds,
-			UsageLine: "builds",
-			Short:     "Shows the builds in a release or releases.",
-		})
+		Run:       Builds,
+		UsageLine: "builds",
+		Short:     "Shows the builds in a release or releases.",
+	})
 	commands.AddCommand(nil, &commander.Command{
-			Run:       ShowRelease,
-			UsageLine: "release",
-			Short:     "Shows the current release",
-		})
+		Run:       ShowRelease,
+		UsageLine: "release",
+		Short:     "Shows the current release",
+	})
 	commands.AddCommand(nil, &commander.Command{
-			Run:       ShowBuild,
-			UsageLine: "branch",
-			Short:     "Shows the current branch",
-		})
+		Run:       ShowBuild,
+		UsageLine: "branch",
+		Short:     "Shows the current branch",
+	})
 	commands.AddCommand(nil, &commander.Command{
-			Run:       ShowCrowbar,
-			UsageLine: "show",
-			Short:     "Shows the location of the top level Crowbar repo",
-		})
+		Run:       ShowCrowbar,
+		UsageLine: "show",
+		Short:     "Shows the location of the top level Crowbar repo",
+	})
 	commands.AddCommand(nil, &commander.Command{
-			Run:       Fetch,
-			UsageLine: "fetch",
-			Short:     "Fetches updates from all remotes",
-		})
+		Run:       Fetch,
+		UsageLine: "fetch",
+		Short:     "Fetches updates from all remotes",
+	})
 	return
 }
 
