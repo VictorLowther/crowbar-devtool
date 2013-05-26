@@ -298,14 +298,50 @@ type resultToken struct {
 	results interface{}
 }
 
+func noopCommit( c chan <- bool) { c <- true }
+
 // Make a default resultToken.
 // It pre-populates commit and rollback with functions that do nothing.
 func makeResultToken() (res *resultToken) {
 	res = &resultToken{
-		commit:   func(c chan<- bool) { c <- true },
-		rollback: func(c chan<- bool) { c <- true },
+		commit:   noopCommit,
+		rollback: noopCommit,
 	}
 	return
+}
+
+// Make commit and rollback functions for things that mess with
+// the git config file.  This works by saving the contents of the
+// git config file, and then discarding the saved changes or writing them out.
+func configCommitter(r *git.Repo) (commit, rollback func(chan <- bool)) {
+	configPath := filepath.Join(r.GitDir,"config")
+	stat,err := file.Stat(configPath)
+	if err != nil {
+		log.Printf("Error stat'ing %s:\n",configPath)
+		panic(err)
+	}
+	if !stat.IsRegular() {
+		log.Panicf("Git config file %s is not a file!\n",configPath)
+	}
+	configContents, err := ioutil.ReadFile(configPath)
+	if err != nil {
+		log.Printf("Error opening %s\n",configPath)
+		panic(err)
+	}
+	// By now we have saved the current config file contents.
+		// No action for commit, we want to leave the new config alone.
+		commit = noopCommit
+	// On rollback, restore the old config.
+	rollback = func(c chan <- bool) {
+		err := ioutil.WriteFile(configPath,configContents,os.FileMode(777))
+		if err != nil {
+			log.Printf("Failed to restore old config file %s\n",configPath)
+			c <- false
+		} else {
+			c <- true
+		}
+	}
+	return commit, rollback
 }
 
 // A slice of pointers to result tokens.
