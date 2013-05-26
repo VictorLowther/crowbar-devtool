@@ -340,6 +340,7 @@ func configCommitter(r *git.Repo) (commit, rollback func(chan <- bool)) {
 		} else {
 			c <- true
 		}
+		r.ReloadConfig()
 	}
 	return commit, rollback
 }
