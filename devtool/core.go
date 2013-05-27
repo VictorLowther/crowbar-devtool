@@ -313,14 +313,14 @@ func makeResultToken() (res *resultToken) {
 // Make commit and rollback functions for things that mess with
 // the git config file.  This works by saving the contents of the
 // git config file, and then discarding the saved changes or writing them out.
-func configCommitter(r *git.Repo) (commit, rollback func(chan <- bool)) {
+func configCheckpointer(r *git.Repo) (commit, rollback func(chan <- bool)) {
 	configPath := filepath.Join(r.GitDir,"config")
-	stat,err := file.Stat(configPath)
+	stat,err := os.Stat(configPath)
 	if err != nil {
 		log.Printf("Error stat'ing %s:\n",configPath)
 		panic(err)
 	}
-	if !stat.IsRegular() {
+	if !stat.Mode().IsRegular() {
 		log.Panicf("Git config file %s is not a file!\n",configPath)
 	}
 	configContents, err := ioutil.ReadFile(configPath)
