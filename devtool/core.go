@@ -445,6 +445,7 @@ func (c *Crowbar) fetch(remotes []string) (ok bool, results resultTokens) {
 	}
 	// Now that all the setup is done, do it!
 	ok, results = repoMapReduce(repos, mapper, reducer)
+	// We do not care about the results of updating tracking branches here.
 	c.updateTrackingBranches()
 	return
 }
