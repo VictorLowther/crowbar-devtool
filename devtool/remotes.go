@@ -69,7 +69,7 @@ func (c *Crowbar) updateTrackingBranches() {
 					continue
 				}
 				// There is one, and we will track it.
-				log.Printf("%s: %s will track  %s\n", name, ref.Name(), remote.Name)
+				log.Printf("%s: %s will track %s\n", name, ref.Name(), remote.Name)
 				if err := ref.TrackRemote(remote.Name); err != nil {
 					log.Print(err)
 					tok.ok = false
