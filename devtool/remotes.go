@@ -38,7 +38,7 @@ func (c *Crowbar) SortedRemotes() (res RemoteSlice) {
 	return res
 }
 
-func (c *Crowbar) updateTrackingBranches() {
+func (c *Crowbar) updateTrackingBranches() (ok bool, res resultTokens) {
 	branchMap := c.AllBarclampBranches()
 	remotes := c.SortedRemotes()
 	log.Println("Updating local tracking branches.")
@@ -89,7 +89,7 @@ func (c *Crowbar) updateTrackingBranches() {
 		}
 		return
 	}
-	repoMapReduce(c.Barclamps, mapper, reducer)
+	ok, res = repoMapReduce(c.Barclamps, mapper, reducer)
 	return
 }
 
@@ -280,8 +280,17 @@ func RenameRemote(cmd *commander.Command, args []string) {
 
 func UpdateTracking(cmd *commander.Command, args []string) {
 	c := mustFindCrowbar("")
-	c.updateTrackingBranches()
-	os.Exit(0)
+	ok, res := c.updateTrackingBranches()
+	if ok {
+		os.Exit(0)
+	}
+	log.Printf("Failed to update tracking branches in: ")
+	for _, result := range res {
+		if !result.ok {
+			log.Printf("\t%s\n", result.name)
+		}
+	}
+	os.Exit(1)
 }
 
 func ListRemotes(cmd *commander.Command, args []string) {
@@ -303,6 +312,18 @@ func ShowRemote(cmd *commander.Command, args []string) {
 	}
 	fmt.Printf("Remote %s:\n\tUrlbase: %s\n\tPriority: %d\n", remote.Name, remote.Urlbase, remote.Priority)
 	os.Exit(0)
+}
+
+func SetRemoteURLBase(cmd *commander.Command, args []string) {
+	c := mustFindCrowbar("")
+	if len(args) != 2 {
+		log.Fatal("Need exactly 2 arguments")
+	}
+	remote, found := c.Remotes[args[0]]
+	if !found {
+		log.Fatalf("%s is not a remote!\n", args[0])
+	}
+	c.SetRemoteURLBase(remote, args[1])
 }
 
 func init() {
@@ -339,6 +360,11 @@ func init() {
 		Run:       RenameRemote,
 		UsageLine: "rename [oldname] [newname]",
 		Short:     "Rename a remote.",
+	})
+	commands.AddCommand(remote, &commander.Command{
+		Run:       SetRemoteURLBase,
+		UsageLine: "set-urlbase [remote] [urlbase]",
+		Short:     "Set a new URL for a remote.",
 	})
 
 }
