@@ -43,6 +43,9 @@ func (c *Crowbar) updateTrackingBranches() {
 	remotes := c.SortedRemotes()
 	log.Println("Updating local tracking branches.")
 	mapper := func(name string, repo *git.Repo, res resultChan) {
+		tok := makeResultToken()
+		tok.commit, tok.rollback = configCheckpointer(repo)
+		tok.name, tok.ok, tok.results = name, true, nil
 		branches := branchMap[name]
 		for _, br := range branches {
 			ref, err := repo.Ref(br)
@@ -67,11 +70,14 @@ func (c *Crowbar) updateTrackingBranches() {
 				}
 				// There is one, and we will track it.
 				log.Printf("%s: %s will track  %s\n", name, ref.Name(), remote.Name)
-				_ = ref.TrackRemote(remote.Name)
+				if err := ref.TrackRemote(remote.Name); err != nil {
+					log.Print(err)
+					tok.ok = false
+				}
 				break
 			}
 		}
-		res <- &resultToken{name: name, ok: true, results: nil}
+		res <- tok
 	}
 	reducer := func(tokens resultChan) (ok bool, res resultTokens) {
 		res = make(resultTokens, len(c.Barclamps), len(c.Barclamps))
@@ -201,6 +207,15 @@ func (c *Crowbar) RenameRemote(remote *Remote, newname string) {
 	c.Remotes[remote.Name] = remote
 	c.Repo.Set("crowbar.remote."+remote.Name+".priority", fmt.Sprint(remote.Priority))
 	c.Repo.Set("crowbar.remote."+remote.Name+".urlbase", remote.Urlbase)
+}
+
+func (c *Crowbar) SetRemoteURLBase(remote *Remote, newurl string) {
+	remote.Urlbase = newurl
+	if !validateRemote(remote) {
+		log.Fatalf("Refusing to set new URL %s for %s\n", newurl)
+	}
+	c.ZapRemote(remote)
+	c.AddRemote(remote)
 }
 
 func AddRemote(cmd *commander.Command, args []string) {
