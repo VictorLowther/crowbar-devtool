@@ -146,15 +146,7 @@ func validateRemote(remote *Remote) bool {
 	return true
 }
 
-func (c *Crowbar) AddRemote(remote *Remote) {
-	if !validateRemote(remote) {
-		log.Fatalf("%s failed validation.", remote.Name)
-	}
-	if c.Remotes[remote.Name] != nil {
-		log.Panicf("Already have a remote named %s\n", remote.Name)
-	}
-	c.Repo.Set("crowbar.remote."+remote.Name+".priority", fmt.Sprint(remote.Priority))
-	c.Repo.Set("crowbar.remote."+remote.Name+".urlbase", remote.Urlbase)
+func (c *Crowbar) addRemote(remote *Remote) {
 	maybeAddRemote := func(repo *git.Repo, reponame string, remote *Remote) {
 		if repo.HasRemote(remote.Name) {
 			log.Printf("%s already has a repo named %s.\n", reponame, remote.Name)
@@ -174,6 +166,18 @@ func (c *Crowbar) AddRemote(remote *Remote) {
 	for name, repo := range c.AllOtherRepos() {
 		maybeAddRemote(repo, name, remote)
 	}
+}
+
+func (c *Crowbar) AddRemote(remote *Remote) {
+	if !validateRemote(remote) {
+		log.Fatalf("%s failed validation.", remote.Name)
+	}
+	if c.Remotes[remote.Name] != nil {
+		log.Panicf("Already have a remote named %s\n", remote.Name)
+	}
+	c.Repo.Set("crowbar.remote."+remote.Name+".priority", fmt.Sprint(remote.Priority))
+	c.Repo.Set("crowbar.remote."+remote.Name+".urlbase", remote.Urlbase)
+	c.addRemote(remote)
 }
 
 func (c *Crowbar) ZapRemote(remote *Remote) {
@@ -207,6 +211,23 @@ func (c *Crowbar) RenameRemote(remote *Remote, newname string) {
 	c.Remotes[remote.Name] = remote
 	c.Repo.Set("crowbar.remote."+remote.Name+".priority", fmt.Sprint(remote.Priority))
 	c.Repo.Set("crowbar.remote."+remote.Name+".urlbase", remote.Urlbase)
+}
+
+func (c *Crowbar) SyncRemotes() {
+	for reponame,repo := c.AllRepos() {
+		remotes := repo.Remotes()
+		for name,remote := range c.Remotes {
+			repopath := filepath.Join(remote,reponame)
+			if url,found := remotes[name]; found {
+				continue
+			} else if url != repopath {
+				repo.ZapRemote(url)
+			}
+			if found,err := repo.ProbeURL(repopath); found {
+				repo.AddRemote(name,repopath)
+			}
+		}
+	}
 }
 
 func (c *Crowbar) SetRemoteURLBase(remote *Remote, newurl string) {
