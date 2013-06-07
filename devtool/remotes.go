@@ -335,6 +335,11 @@ func ShowRemote(cmd *commander.Command, args []string) {
 	os.Exit(0)
 }
 
+func SyncRemotes(cmd *commander.Command, args []string) {
+	c := mustFindCrowbar("")
+	c.SyncRemotes()
+}
+
 func SetRemoteURLBase(cmd *commander.Command, args []string) {
 	c := mustFindCrowbar("")
 	if len(args) != 2 {
@@ -386,6 +391,11 @@ func init() {
 		Run:       SetRemoteURLBase,
 		UsageLine: "set-urlbase [remote] [urlbase]",
 		Short:     "Set a new URL for a remote.",
+	})
+	commands.AddCommand(remote, &commander.Command{
+		Run:       SyncRemotes,
+		UsageLine: "sync",
+		Short:     "Recalculate and synchronize remotes across all repositories.",
 	})
 
 }
