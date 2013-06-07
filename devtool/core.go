@@ -345,6 +345,28 @@ func configCheckpointer(r *git.Repo) (commit, rollback func(chan<- bool)) {
 	return commit, rollback
 }
 
+func branchCheckpointer(r *git.Repo) (commit, rollback func(chan<- bool)) {
+	// We only care about branch refernces, and we only want to save
+	// the SHA references to the branches.
+	refs := make(map[string]string)
+	for _, ref := range r.Branches() {
+		refs[ref.Name()] = ref.SHA
+	}
+	// There is no commit action.
+	commit = noopCommit
+	// On rollback, force all the branches back to where we were.
+	rollback = func(c chan<- bool) {
+		res := true
+		for name, sha := range refs {
+			cmd, _, _ := r.Git("branch", "-f", name, sha)
+			res = res & (cmd.Run() == nil)
+		}
+		c <- res
+
+	}
+	return
+}
+
 // A slice of pointers to result tokens.
 type resultTokens []*resultToken
 
@@ -493,6 +515,11 @@ func (c *Crowbar) currentBuild() Build {
 		log.Fatalf("Current build %s does not exist!", res)
 	}
 	return build
+}
+
+func (c *Crowbar) Rebase(err error) {
+	repos := c.AllRepos()
+
 }
 
 func (c *Crowbar) barclampsInBuild(build Build) BarclampMap {
