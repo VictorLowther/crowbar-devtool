@@ -216,15 +216,19 @@ func (c *Crowbar) RenameRemote(remote *Remote, newname string) {
 func (c *Crowbar) SyncRemotes() {
 	for reponame,repo := range c.AllRepos() {
 		remotes := repo.Remotes()
-		for name,remote := range c.Remotes {
-			repopath := filepath.Join(remote,reponame)
-			if url,found := remotes[name]; found {
+		for _,remote  := range c.Remotes {
+			repopath := filepath.Join(remote.Urlbase,reponame)
+			if url,found := remotes[remote.Name]; found {
 				continue
-			} else if url != repopath {
-				repo.ZapRemote(url)
+			} else if found && url != repopath {
+				log.Printf("Remote %s in repo %s not pointing at proper URL.\n",remote.Name,reponame)
+				repo.ZapRemote(remote.Name)
 			}
-			if found,err := repo.ProbeURL(repopath); found {
-				repo.AddRemote(name,repopath)
+			if found,_ := repo.ProbeURL(repopath); found {
+				log.Printf("Adding new remote %s (%s) to %s\n",remote.Name,repopath,reponame)
+				repo.AddRemote(remote.Name,repopath)
+			} else {
+				log.Printf("Repo %s is not at remote %s\n",reponame,remote.Name)
 			}
 		}
 	}
