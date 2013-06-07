@@ -214,7 +214,7 @@ func (c *Crowbar) RenameRemote(remote *Remote, newname string) {
 }
 
 func (c *Crowbar) SyncRemotes() {
-	for reponame,repo := c.AllRepos() {
+	for reponame,repo := range c.AllRepos() {
 		remotes := repo.Remotes()
 		for name,remote := range c.Remotes {
 			repopath := filepath.Join(remote,reponame)
