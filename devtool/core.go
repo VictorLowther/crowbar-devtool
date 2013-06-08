@@ -359,7 +359,7 @@ func branchCheckpointer(r *git.Repo) (commit, rollback func(chan<- bool)) {
 		res := true
 		for name, sha := range refs {
 			cmd, _, _ := r.Git("branch", "-f", name, sha)
-			res = res & (cmd.Run() == nil)
+			res = res && (cmd.Run() == nil)
 		}
 		c <- res
 
@@ -517,9 +517,40 @@ func (c *Crowbar) currentBuild() Build {
 	return build
 }
 
-func (c *Crowbar) Rebase(err error) {
+func (c *Crowbar) Rebase() (ok bool, res resultTokens) {
 	repos := c.AllRepos()
-
+	log.Println("Rebasing local branches on remote tracking branches")
+	mapper := func(name string, repo *git.Repo, res resultChan) {
+		tok := makeResultToken()
+		tok.commit,tok.rollback = branchCheckpointer(repo)
+		tok.name, tok.ok, tok.results = name,true,nil
+		for _,branch := range repo.Branches() {
+			upstream,err := branch.TrackedRef()
+			if err != nil {
+				// We don't track anything, don't bother rebasing.
+				continue
+			}
+			if err = branch.RebaseOnto(upstream); err != nil {
+				tok.ok = false
+				log.Print(err)
+				tok.results = err
+				break
+			}
+		}
+		res <- tok
+	}
+	reducer := func(vals resultChan) (ok bool, res resultTokens) {
+		res = make(resultTokens,len(repos),len(repos))
+		ok = true
+		for i,_ := range res {
+			item := <- vals
+			res[i] = item
+			ok = ok && item.ok
+		}
+		return
+	}
+	ok,res = repoMapReduce(repos,mapper,reducer)
+	return
 }
 
 func (c *Crowbar) barclampsInBuild(build Build) BarclampMap {
@@ -550,6 +581,25 @@ func Fetch(cmd *commander.Command, args []string) {
 		log.Printf("All updates fetched.\n")
 		os.Exit(0)
 	}
+	os.Exit(1)
+}
+
+func Sync(cmd *commander.Command, args []string) {
+	c := mustFindCrowbar("")
+	ok,_ := c.is_clean()
+	if !ok {
+		log.Printf("Cannot rebase local changes, Crowbar is not clean.\n")
+		IsClean(cmd,args)
+	}
+	ok,res := c.Rebase()
+	if ok {
+		log.Println("All local changes rebased against upstream.")
+		os.Exit(0)
+	}
+	for _,tok := range res {
+		log.Printf("%v: %v %v\n",tok.name,tok.ok,tok.results)
+	}
+	log.Println("Errors rebasing local changes.  All changes unwound.")
 	os.Exit(1)
 }
 
@@ -678,6 +728,12 @@ func init() {
 		UsageLine: "fetch",
 		Short:     "Fetches updates from all remotes",
 	})
+	commands.AddCommand(nil, &commander.Command{
+		Run:       Sync,
+		UsageLine: "sync",
+		Short:     "Rebase local changes on their tracked upstream changes.",
+	})
+
 	return
 }
 
