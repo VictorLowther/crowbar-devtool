@@ -1,6 +1,7 @@
 package devtool
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"github.com/VictorLowther/crowbar-devtool/commands"
@@ -517,15 +518,20 @@ func (c *Crowbar) currentBuild() Build {
 	return build
 }
 
+func (c *Crowbar) setBuild(build Build) {
+	c.Repo.Set("crowbar.build", build.FullName())
+	c.Repo.Set("crowbar.release", build.Release().Name())
+}
+
 func (c *Crowbar) Rebase() (ok bool, res resultTokens) {
 	repos := c.AllRepos()
 	log.Println("Rebasing local branches on remote tracking branches")
 	mapper := func(name string, repo *git.Repo, res resultChan) {
 		tok := makeResultToken()
-		tok.commit,tok.rollback = branchCheckpointer(repo)
-		tok.name, tok.ok, tok.results = name,true,nil
-		for _,branch := range repo.Branches() {
-			upstream,err := branch.TrackedRef()
+		tok.commit, tok.rollback = branchCheckpointer(repo)
+		tok.name, tok.ok, tok.results = name, true, nil
+		for _, branch := range repo.Branches() {
+			upstream, err := branch.TrackedRef()
 			if err != nil {
 				// We don't track anything, don't bother rebasing.
 				continue
@@ -540,16 +546,16 @@ func (c *Crowbar) Rebase() (ok bool, res resultTokens) {
 		res <- tok
 	}
 	reducer := func(vals resultChan) (ok bool, res resultTokens) {
-		res = make(resultTokens,len(repos),len(repos))
+		res = make(resultTokens, len(repos), len(repos))
 		ok = true
-		for i,_ := range res {
-			item := <- vals
+		for i, _ := range res {
+			item := <-vals
 			res[i] = item
 			ok = ok && item.ok
 		}
 		return
 	}
-	ok,res = repoMapReduce(repos,mapper,reducer)
+	ok, res = repoMapReduce(repos, mapper, reducer)
 	return
 }
 
@@ -569,6 +575,88 @@ func (c *Crowbar) barclampsInBuild(build Build) BarclampMap {
 	return res
 }
 
+func switchToEmptyBranch(r *git.Repo) error {
+	contents := bytes.NewBufferString("This branch intentionally left blank\n")
+	readme := filepath.Join(r.WorkDir, "README.empty-branch")
+	if ref, err := r.Ref("empty-branch"); err == nil {
+		return ref.Checkout()
+	}
+	cmd, _, _ := r.Git("checkout", "--orphan", "empty-branch")
+	if cmd.Run() != nil {
+		return fmt.Errorf("Could not create empty-branch")
+	}
+	cmd, _, _ = r.Git("rm", "-r", "--cached", ".")
+	if cmd.Run() != nil {
+		return fmt.Errorf("Could not remove index from empty-branch")
+	}
+	cmd, _, _ = r.Git("clean", "-f", "-x", "-d")
+	if cmd.Run() != nil {
+		return fmt.Errorf("Could not clean working tree for empty-branch")
+	}
+	if ioutil.WriteFile(readme, contents.Bytes(), os.FileMode(0644)) != nil {
+		return fmt.Errorf("Could not create README.empty-branch")
+	}
+	cmd, _, _ = r.Git("add", "README.empty-branch")
+	if cmd.Run() != nil {
+		return fmt.Errorf("Could not add README.empty-branch to empty-branch")
+	}
+	cmd, _, _ = r.Git("commit", "-m", "Created empty branch.")
+	if cmd.Run() != nil {
+		return fmt.Errorf("Could not create initial commit to empty-branch")
+	}
+	return nil
+}
+
+func (c *Crowbar) Switch(build Build) (ok bool, res resultTokens) {
+	newBarclamps := c.barclampsInBuild(build)
+	// Build a map of barclamp name -> target branches
+	barclampTargets := make(map[string]string)
+	for name, _ := range c.Barclamps {
+		if _, found := newBarclamps[name]; found {
+			barclampTargets[name] = newBarclamps[name].Branch
+		} else {
+			barclampTargets[name] = "empty-branch"
+		}
+	}
+	mapper := func(name string, repo *git.Repo, res resultChan) {
+		targetBranch := barclampTargets[name]
+		tok := makeResultToken()
+		tok.name, tok.ok, tok.results = name, true, nil
+		current, err := repo.CurrentRef()
+		if err != nil {
+			tok.ok = false
+			tok.results = err
+		} else if current.Name() != targetBranch {
+			tok.results = fmt.Errorf("Switched %s to %s",current.Name(),targetBranch)
+			if targetBranch == "empty-branch" {
+				if err = switchToEmptyBranch(repo); err != nil {
+					tok.ok = false
+					tok.results = err
+				}
+			} else if err = repo.Checkout(targetBranch); err != nil {
+				tok.ok = false
+				tok.results = err
+			}
+		}
+		res <- tok
+	}
+	reducer := func(vals resultChan) (ok bool, res resultTokens) {
+		res = make(resultTokens, len(barclampTargets), len(barclampTargets))
+		ok = true
+		for i, _ := range res {
+			item := <-vals
+			ok = ok && item.ok
+			res[i] = item
+		}
+		return
+	}
+	ok, res = repoMapReduce(c.Barclamps, mapper, reducer)
+	if ok {
+		c.setBuild(build)
+	}
+	return
+}
+
 func ShowCrowbar(cmd *commander.Command, args []string) {
 	r := mustFindCrowbar("")
 	log.Printf("Crowbar is located at: %s\n", r.Repo.Path())
@@ -586,18 +674,18 @@ func Fetch(cmd *commander.Command, args []string) {
 
 func Sync(cmd *commander.Command, args []string) {
 	c := mustFindCrowbar("")
-	ok,_ := c.is_clean()
+	ok, _ := c.is_clean()
 	if !ok {
 		log.Printf("Cannot rebase local changes, Crowbar is not clean.\n")
-		IsClean(cmd,args)
+		IsClean(cmd, args)
 	}
-	ok,res := c.Rebase()
+	ok, res := c.Rebase()
 	if ok {
 		log.Println("All local changes rebased against upstream.")
 		os.Exit(0)
 	}
-	for _,tok := range res {
-		log.Printf("%v: %v %v\n",tok.name,tok.ok,tok.results)
+	for _, tok := range res {
+		log.Printf("%v: %v %v\n", tok.name, tok.ok, tok.results)
 	}
 	log.Println("Errors rebasing local changes.  All changes unwound.")
 	os.Exit(1)
@@ -687,6 +775,52 @@ func BarclampsInBuild(cmd *commander.Command, args []string) {
 	}
 }
 
+func Switch(cmd *commander.Command, args []string) {
+	c := mustFindCrowbar("")
+	if ok, _ := c.is_clean(); !ok {
+		log.Fatalln("Crowbar is not clean, cannot switch builds.")
+	}
+	rels := c.Releases()
+	current := c.currentBuild()
+	var target Build
+	found := false
+	switch len(args) {
+	case 0:
+		target, found = current, true
+	case 1:
+		// Were we passed a known release?
+		rel, found_rel := rels[args[0]]
+		if found_rel {
+			for _,build := range []string{current.Name(), "master"} {
+				target, found = rel.Builds()[build]
+				if found {
+					break
+				}
+			}
+		} else {
+			target, found = c.Builds()[args[0]]
+		}
+	default:
+		log.Fatalf("switch takes 0 or 1 argument.")
+	}
+	if !found {
+		log.Fatalf("%s is not anything we can switch to!")
+	}
+	ok,tokens := c.Switch(target)
+	for _,tok := range tokens {
+		if tok.results != nil {
+			log.Printf("%s: %v\n",tok.name,tok.results)
+		}
+	}
+	if ok {
+		log.Printf("Switched to %s\n",target.FullName())
+		os.Exit(0)
+	}
+	log.Printf("Failed to switch to %s!\n",target.FullName())
+	ok,_ = c.Switch(current)
+	os.Exit(1)
+}
+
 func init() {
 	commands.AddCommand(nil, &commander.Command{
 		Run:       IsClean,
@@ -732,6 +866,11 @@ func init() {
 		Run:       Sync,
 		UsageLine: "sync",
 		Short:     "Rebase local changes on their tracked upstream changes.",
+	})
+	commands.AddCommand(nil, &commander.Command{
+		Run:       Switch,
+		UsageLine: "switch",
+		Short:     "Switch to the named release or build",
 	})
 
 	return
