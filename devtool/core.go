@@ -4,14 +4,11 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
-	"github.com/VictorLowther/crowbar-devtool/commands"
 	"github.com/VictorLowther/go-git/git"
-	"github.com/gonuts/commander"
 	"io/ioutil"
 	"log"
 	"os"
 	"path/filepath"
-	"sort"
 	"strconv"
 	"strings"
 )
@@ -204,7 +201,7 @@ func findCrowbar(path string) (res *Crowbar, err error) {
 }
 
 // This is the same as findCrowbar, except we die if we cannot find Crowbar.
-func mustFindCrowbar(path string) *Crowbar {
+func MustFindCrowbar(path string) *Crowbar {
 	res, err := findCrowbar(path)
 	dieIfError(err)
 	return res
@@ -283,14 +280,14 @@ func (c *Crowbar) AllRepos() (res RepoMap) {
 }
 
 // The result type that all mappers in the repoMapReduce framework expect.
-type resultToken struct {
+type ResultToken struct {
 	// name should be unique among all the mapreduce operations.
 	// It will usually be the name of a barclamp or other repository.
-	name string
+	Name string
 	// true if the map operations results are valid, false otherwise.
 	// We split this out because I expect that most operations will
 	// care about rolling this up.
-	ok bool
+	OK bool
 	// A function that will be called to commit this result in the
 	// case that all the results are OK.
 	commit func(chan<- bool)
@@ -299,15 +296,15 @@ type resultToken struct {
 	rollback func(chan<- bool)
 	// The detailed result of an individual map function.
 	// The framework will treat this as an opaque token.
-	results interface{}
+	Results interface{}
 }
 
 func noopCommit(c chan<- bool) { c <- true }
 
-// Make a default resultToken.
+// Make a default ResultToken.
 // It pre-populates commit and rollback with functions that do nothing.
-func makeResultToken() (res *resultToken) {
-	res = &resultToken{
+func makeResultToken() (res *ResultToken) {
+	res = &ResultToken{
 		commit:   noopCommit,
 		rollback: noopCommit,
 	}
@@ -374,34 +371,34 @@ func branchCheckpointer(r *git.Repo) (commit, rollback func(chan<- bool)) {
 }
 
 // A slice of pointers to result tokens.
-type resultTokens []*resultToken
+type ResultTokens []*ResultToken
 
 // A channel for passing result tokens around.
-type resultChan chan *resultToken
+type resultChan chan *ResultToken
 
 // The function signature that a mapper function must have.
 // string should be a unique name that should be derived from the name of a
 //   repository in some way.
 // *git.Repo is a pointer to a git repository structure.
-// resultChan is the channel that the mapper should put its resultToken on.
-// repoMapper must populate the commit and rollback functions in the resultToken,
+// resultChan is the channel that the mapper should put its ResultToken on.
+// repoMapper must populate the commit and rollback functions in the ResultToken,
 // although they can be functions that do nothing.
 type repoMapper func(string, *git.Repo, resultChan)
 
 // The function signature that a reducer must have. It should loop over
 // the values it gets from resultChan, evaluate overall success or failure,
 // and return the overall success or failure along with an array of all the results.
-type repoReducer func(resultChan) (bool, resultTokens)
+type repoReducer func(resultChan) (bool, ResultTokens)
 
 // Make a basic reducer that can be used if more complicated processing
 // during a reduce is not needed.
 func makeBasicReducer(items int) repoReducer {
-	return func(vals resultChan) (ok bool, res resultTokens) {
-		res = make(resultTokens, items, items)
+	return func(vals resultChan) (ok bool, res ResultTokens) {
+		res = make(ResultTokens, items, items)
 		ok = true
 		for i, _ := range res {
 			item := <-vals
-			ok = ok && item.ok
+			ok = ok && item.OK
 			res[i] = item
 		}
 		return
@@ -409,9 +406,9 @@ func makeBasicReducer(items int) repoReducer {
 }
 
 // Perform operations in parallel across the repositories and collect the results.
-// If all the results are OK, then the commit function of each resultToken is called,
-// otherwise the rollback function of each resultToken is called.
-func repoMapReduce(repos RepoMap, mapper repoMapper, reducer repoReducer) (ok bool, res resultTokens) {
+// If all the results are OK, then the commit function of each ResultToken is called,
+// otherwise the rollback function of each ResultToken is called.
+func repoMapReduce(repos RepoMap, mapper repoMapper, reducer repoReducer) (ok bool, res ResultTokens) {
 	results := make(resultChan)
 	defer close(results)
 	for name, repo := range repos {
@@ -445,7 +442,7 @@ func repoMapReduce(repos RepoMap, mapper repoMapper, reducer repoReducer) (ok bo
 }
 
 // Perform a git fetch across all the repositories.
-func (c *Crowbar) Fetch(remotes []string) (ok bool, results resultTokens) {
+func (c *Crowbar) Fetch(remotes []string) (ok bool, results ResultTokens) {
 	repos := c.AllRepos()
 	// mapper and reducer are the functions we will
 	// hand over to repoMapReduce.
@@ -455,26 +452,26 @@ func (c *Crowbar) Fetch(remotes []string) (ok bool, results resultTokens) {
 		tok := makeResultToken()
 		ok, items := repo.Fetch(remotes)
 		// Since you cannot unwind a fetch, use the default commit/rollback functions.
-		tok.name, tok.ok, tok.results = name, ok, items
+		tok.Name, tok.OK, tok.Results = name, ok, items
 		res <- tok
 	}
 	// reducer iterates over all the results as they arrive,
 	// printing status messages along the way and keeping
 	// a running idea about which fetches worked.
 	// It also serves to show off variable capture.
-	reducer := func(vals resultChan) (bool, resultTokens) {
+	reducer := func(vals resultChan) (bool, ResultTokens) {
 		ok := true
-		res := make(resultTokens, len(repos), len(repos))
+		res := make(ResultTokens, len(repos), len(repos))
 		for i, _ := range res {
 			item := <-vals
 			res[i] = item
-			if item.ok {
-				log.Printf("Fetched all updates for %s\n", item.name)
+			if item.OK {
+				log.Printf("Fetched all updates for %s\n", item.Name)
 			} else {
-				log.Printf("Failed to fetch all changes for %s:\n", item.name)
-				fetch_results, cast_ok := item.results.(git.FetchMap)
+				log.Printf("Failed to fetch all changes for %s:\n", item.Name)
+				fetch_results, cast_ok := item.Results.(git.FetchMap)
 				if !cast_ok {
-					log.Panicf("Could not cast fetch results for %s into git.FetchMap\n", item.name)
+					log.Panicf("Could not cast fetch results for %s into git.FetchMap\n", item.Name)
 				}
 				for k, v := range fetch_results {
 					if !v {
@@ -482,27 +479,27 @@ func (c *Crowbar) Fetch(remotes []string) (ok bool, results resultTokens) {
 					}
 				}
 			}
-			ok = ok && res[i].ok
+			ok = ok && res[i].OK
 		}
 		return ok, res
 	}
 	// Now that all the setup is done, do it!
 	ok, results = repoMapReduce(repos, mapper, reducer)
 	// We do not care about the results of updating tracking branches here.
-	c.updateTrackingBranches()
+	c.UpdateTrackingBranches()
 	return
 }
 
 // See of all our git repositories are clean.
 // Clean means there are no uncommitted changes and no untracked files.
-func (c *Crowbar) IsClean() (ok bool, results resultTokens) {
+func (c *Crowbar) IsClean() (ok bool, results ResultTokens) {
 	repos := c.AllRepos()
 	mapper := func(name string, repo *git.Repo, res resultChan) {
 		ok, items := repo.IsClean()
 		tok := makeResultToken()
 		// There is nothing to unwind or rollback when testing to see
 		// if things are clean.
-		tok.name, tok.ok, tok.results = name, ok, items
+		tok.Name, tok.OK, tok.Results = name, ok, items
 		res <- tok
 	}
 	ok, results = repoMapReduce(repos, mapper, makeBasicReducer(len(repos)))
@@ -538,13 +535,13 @@ func (c *Crowbar) setBuild(build Build) {
 }
 
 // Rebase local changes on top of changes from upstream fetched by a Fetch.
-func (c *Crowbar) Rebase() (ok bool, res resultTokens) {
+func (c *Crowbar) Rebase() (ok bool, res ResultTokens) {
 	repos := c.AllRepos()
 	log.Println("Rebasing local branches on remote tracking branches")
 	mapper := func(name string, repo *git.Repo, res resultChan) {
 		tok := makeResultToken()
 		tok.commit, tok.rollback = branchCheckpointer(repo)
-		tok.name, tok.ok, tok.results = name, true, nil
+		tok.Name, tok.OK, tok.Results = name, true, nil
 		for _, branch := range repo.Branches() {
 			upstream, err := branch.TrackedRef()
 			if err != nil {
@@ -552,9 +549,9 @@ func (c *Crowbar) Rebase() (ok bool, res resultTokens) {
 				continue
 			}
 			if err = branch.RebaseOnto(upstream); err != nil {
-				tok.ok = false
+				tok.OK = false
 				log.Print(err)
-				tok.results = err
+				tok.Results = err
 				break
 			}
 		}
@@ -616,7 +613,8 @@ func switchToEmptyBranch(r *git.Repo) error {
 }
 
 // Switch the barclamps to the proper branches for a specific build.
-func (c *Crowbar) Switch(build Build) (ok bool, res resultTokens) {
+// Any barclamps not involved in the build will be set to the empty branch.
+func (c *Crowbar) Switch(build Build) (ok bool, res ResultTokens) {
 	newBarclamps := c.BarclampsInBuild(build)
 	// Build a map of barclamp name -> target branches
 	barclampTargets := make(map[string]string)
@@ -630,21 +628,21 @@ func (c *Crowbar) Switch(build Build) (ok bool, res resultTokens) {
 	mapper := func(name string, repo *git.Repo, res resultChan) {
 		targetBranch := barclampTargets[name]
 		tok := makeResultToken()
-		tok.name, tok.ok, tok.results = name, true, nil
+		tok.Name, tok.OK, tok.Results = name, true, nil
 		current, err := repo.CurrentRef()
 		if err != nil {
-			tok.ok = false
-			tok.results = err
+			tok.OK = false
+			tok.Results = err
 		} else if current.Name() != targetBranch {
-			tok.results = fmt.Errorf("Switched %s to %s", current.Name(), targetBranch)
+			tok.Results = fmt.Errorf("Switched %s to %s", current.Name(), targetBranch)
 			if targetBranch == "empty-branch" {
 				if err = switchToEmptyBranch(repo); err != nil {
-					tok.ok = false
-					tok.results = err
+					tok.OK = false
+					tok.Results = err
 				}
 			} else if err = repo.Checkout(targetBranch); err != nil {
-				tok.ok = false
-				tok.results = err
+				tok.OK = false
+				tok.Results = err
 			}
 		}
 		res <- tok
@@ -654,238 +652,5 @@ func (c *Crowbar) Switch(build Build) (ok bool, res resultTokens) {
 		c.setBuild(build)
 		build.FinalizeSwitch()
 	}
-	return
-}
-
-func ShowCrowbar(cmd *commander.Command, args []string) {
-	r := mustFindCrowbar("")
-	log.Printf("Crowbar is located at: %s\n", r.Repo.Path())
-}
-
-func Fetch(cmd *commander.Command, args []string) {
-	c := mustFindCrowbar("")
-	ok, _ := c.Fetch(nil)
-	if !ok {
-		os.Exit(1)
-	}
-	log.Printf("All updates fetched.\n")
-}
-
-func Sync(cmd *commander.Command, args []string) {
-	c := mustFindCrowbar("")
-	ok, _ := c.IsClean()
-	if !ok {
-		log.Printf("Cannot rebase local changes, Crowbar is not clean.\n")
-		IsClean(cmd, args)
-	}
-	ok, res := c.Rebase()
-	if ok {
-		log.Println("All local changes rebased against upstream.")
-		os.Exit(0)
-	}
-	for _, tok := range res {
-		log.Printf("%v: %v %v\n", tok.name, tok.ok, tok.results)
-	}
-	log.Println("Errors rebasing local changes.  All changes unwound.")
-	os.Exit(1)
-}
-
-func IsClean(cmd *commander.Command, args []string) {
-	c := mustFindCrowbar("")
-	ok, items := c.IsClean()
-	if ok {
-		log.Println("All Crowbar repositories are clean.")
-		os.Exit(0)
-	}
-	for _, item := range items {
-		if !item.ok {
-			log.Printf("%s is not clean:\n", item.name)
-			for _, line := range item.results.(git.StatLines) {
-				log.Printf("\t%s\n", line.Print())
-			}
-		}
-	}
-	os.Exit(1)
-	return
-}
-
-func ShowRelease(cmd *commander.Command, args []string) {
-	c := mustFindCrowbar("")
-	fmt.Println(c.CurrentRelease().Name())
-}
-
-func ShowBuild(cmd *commander.Command, args []string) {
-	c := mustFindCrowbar("")
-	fmt.Println(c.CurrentBuild().FullName())
-}
-
-func Releases(cmd *commander.Command, args []string) {
-	c := mustFindCrowbar("")
-	res := make([]string, 0, 20)
-	for release, _ := range c.Releases() {
-		res = append(res, release)
-	}
-	sort.Strings(res)
-	for _, release := range res {
-		fmt.Println(release)
-	}
-}
-
-func Builds(cmd *commander.Command, args []string) {
-	c := mustFindCrowbar("")
-	res := make([]string, 0, 20)
-	if len(args) == 0 {
-		for build, _ := range c.CurrentRelease().Builds() {
-			res = append(res, c.CurrentRelease().Name()+"/"+build)
-		}
-	} else {
-		for _, release := range args {
-			for build, _ := range c.Release(release).Builds() {
-				res = append(res, release+"/"+build)
-			}
-		}
-	}
-	sort.Strings(res)
-	for _, build := range res {
-		fmt.Println(build)
-	}
-}
-
-func BarclampsInBuild(cmd *commander.Command, args []string) {
-	c := mustFindCrowbar("")
-	res := make([]string, 0, 20)
-	var build Build
-	var found bool
-	if len(args) == 0 {
-		build = c.CurrentBuild()
-	} else if len(args) == 1 {
-		builds := c.Builds()
-		build, found = builds[args[0]]
-		if !found {
-			log.Fatalln("No such build %s", args[0])
-		}
-	}
-	for name, _ := range c.BarclampsInBuild(build) {
-		res = append(res, name)
-	}
-	sort.Strings(res)
-	for _, name := range res {
-		fmt.Println(name)
-	}
-}
-
-func Switch(cmd *commander.Command, args []string) {
-	c := mustFindCrowbar("")
-	if ok, _ := c.IsClean(); !ok {
-		log.Fatalln("Crowbar is not clean, cannot switch builds.")
-	}
-	rels := c.Releases()
-	current := c.CurrentBuild()
-	var target Build
-	found := false
-	switch len(args) {
-	case 0:
-		target, found = current, true
-	case 1:
-		// Were we passed a known release?
-		rel, found_rel := rels[args[0]]
-		if found_rel {
-			for _, build := range []string{current.Name(), "master"} {
-				target, found = rel.Builds()[build]
-				if found {
-					break
-				}
-			}
-		} else {
-			target, found = c.Builds()[args[0]]
-		}
-	default:
-		log.Fatalf("switch takes 0 or 1 argument.")
-	}
-	if !found {
-		log.Fatalf("%s is not anything we can switch to!")
-	}
-	ok, tokens := c.Switch(target)
-	for _, tok := range tokens {
-		if tok.results != nil {
-			log.Printf("%s: %v\n", tok.name, tok.results)
-		}
-	}
-	if ok {
-		log.Printf("Switched to %s\n", target.FullName())
-		os.Exit(0)
-	}
-	log.Printf("Failed to switch to %s!\n", target.FullName())
-	ok, _ = c.Switch(current)
-	os.Exit(1)
-}
-
-func Update(cmd *commander.Command, args []string) {
-	Fetch(cmd, args)
-	Sync(cmd, args)
-}
-
-func init() {
-	commands.AddCommand(nil, &commander.Command{
-		Run:       IsClean,
-		UsageLine: "clean?",
-		Short:     "Shows whether Crowbar overall is clean.",
-	})
-	commands.AddCommand(nil, &commander.Command{
-		Run:       Releases,
-		UsageLine: "releases",
-		Short:     "Shows the releases available to work on.",
-	})
-	commands.AddCommand(nil, &commander.Command{
-		Run:       BarclampsInBuild,
-		UsageLine: "barclamps-in-build [build]",
-		Short:     "Shows the releases available to work on.",
-	})
-	commands.AddCommand(nil, &commander.Command{
-		Run:       Builds,
-		UsageLine: "builds",
-		Short:     "Shows the builds in a release or releases.",
-	})
-	commands.AddCommand(nil, &commander.Command{
-		Run:       ShowRelease,
-		UsageLine: "release",
-		Short:     "Shows the current release",
-	})
-	commands.AddCommand(nil, &commander.Command{
-		Run:       ShowBuild,
-		UsageLine: "branch",
-		Short:     "Shows the current branch",
-	})
-	commands.AddCommand(nil, &commander.Command{
-		Run:       ShowCrowbar,
-		UsageLine: "show",
-		Short:     "Shows the location of the top level Crowbar repo",
-	})
-	commands.AddCommand(nil, &commander.Command{
-		Run:       Fetch,
-		UsageLine: "fetch",
-		Short:     "Fetches updates from all remotes",
-	})
-	commands.AddCommand(nil, &commander.Command{
-		Run:       Sync,
-		UsageLine: "sync",
-		Short:     "Rebase local changes on their tracked upstream changes.",
-	})
-	commands.AddCommand(nil, &commander.Command{
-		Run:       Switch,
-		UsageLine: "switch",
-		Short:     "Switch to the named release or build",
-	})
-	commands.AddCommand(nil, &commander.Command{
-		Run:       Update,
-		UsageLine: "update",
-		Short:     "Fetch all changes from upstream and then rebase local changes on top of them.",
-	})
-
-	return
-}
-
-func Run() {
-	commands.Run()
 	return
 }

@@ -10,12 +10,14 @@ import (
 	"strings"
 )
 
+// Base type for representing flat metadata.
 type FlatMetadata struct {
 	path     string
 	releases ReleaseMap
 	crowbar  *Crowbar
 }
 
+// How we represent a release in the flat metadata.
 type FlatRelease struct {
 	name, parent string
 	meta         *FlatMetadata
@@ -53,12 +55,14 @@ func (r *FlatRelease) Parent() Release {
 	return r.meta.releases[r.parent]
 }
 
+// How we represent a build in the flat metadata.
 type FlatBuild struct {
 	name, parent string
 	release      *FlatRelease
 	barclamps    BarclampMap
 }
 
+// Return the absolute path to the location that the build metadata is at.
 func (b *FlatBuild) path() string {
 	return filepath.Join(b.release.path(), b.name)
 }
