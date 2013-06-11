@@ -319,6 +319,7 @@ func init() {
 		Name: "dev",
 		Flag: flag.NewFlagSet("dev", flag.ExitOnError),
 	}
+	// Core Crowbar commands.
 	addCommand(nil, &commander.Command{
 		Run:       IsClean,
 		UsageLine: "clean?",
@@ -378,6 +379,7 @@ and exits with an exit code of 1.`,
 		UsageLine: "update",
 		Short:     "Fetch all changes from upstream and then rebase local changes on top of them.",
 	})
+	// Remote Management commands.
 	remote := addSubCommand(nil, &commander.Commander{
 		Name:  "remote",
 		Short: "Subcommands dealing with remote manipulation",
