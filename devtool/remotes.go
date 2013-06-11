@@ -79,17 +79,7 @@ func (c *Crowbar) updateTrackingBranches() (ok bool, res resultTokens) {
 		}
 		res <- tok
 	}
-	reducer := func(tokens resultChan) (ok bool, res resultTokens) {
-		res = make(resultTokens, len(c.Barclamps), len(c.Barclamps))
-		ok = true
-		for i, _ := range res {
-			item := <-tokens
-			res[i] = item
-			ok = ok && item.ok
-		}
-		return
-	}
-	ok, res = repoMapReduce(c.Barclamps, mapper, reducer)
+	ok, res = repoMapReduce(c.Barclamps, mapper, makeBasicReducer(len(c.Barclamps)))
 	return
 }
 

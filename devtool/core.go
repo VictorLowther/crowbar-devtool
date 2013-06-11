@@ -349,6 +349,8 @@ func configCheckpointer(r *git.Repo) (commit, rollback func(chan<- bool)) {
 	return commit, rollback
 }
 
+// Make commit and rollback functions for a specific repo where we will
+// be messing with the branches.
 func branchCheckpointer(r *git.Repo) (commit, rollback func(chan<- bool)) {
 	// We only care about branch refernces, and we only want to save
 	// the SHA references to the branches.
@@ -391,6 +393,21 @@ type repoMapper func(string, *git.Repo, resultChan)
 // and return the overall success or failure along with an array of all the results.
 type repoReducer func(resultChan) (bool, resultTokens)
 
+// Make a basic reducer that can be used if more complicated processing
+// during a reduce is not needed.
+func makeBasicReducer(items int) repoReducer {
+	return func(vals resultChan) (ok bool, res resultTokens) {
+		res = make(resultTokens, items, items)
+		ok = true
+		for i, _ := range res {
+			item := <-vals
+			ok = ok && item.ok
+			res[i] = item
+		}
+		return
+	}
+}
+
 // Perform operations in parallel across the repositories and collect the results.
 // If all the results are OK, then the commit function of each resultToken is called,
 // otherwise the rollback function of each resultToken is called.
@@ -428,7 +445,7 @@ func repoMapReduce(repos RepoMap, mapper repoMapper, reducer repoReducer) (ok bo
 }
 
 // Perform a git fetch across all the repositories.
-func (c *Crowbar) fetch(remotes []string) (ok bool, results resultTokens) {
+func (c *Crowbar) Fetch(remotes []string) (ok bool, results resultTokens) {
 	repos := c.AllRepos()
 	// mapper and reducer are the functions we will
 	// hand over to repoMapReduce.
@@ -476,7 +493,9 @@ func (c *Crowbar) fetch(remotes []string) (ok bool, results resultTokens) {
 	return
 }
 
-func (c *Crowbar) is_clean() (ok bool, results resultTokens) {
+// See of all our git repositories are clean.
+// Clean means there are no uncommitted changes and no untracked files.
+func (c *Crowbar) IsClean() (ok bool, results resultTokens) {
 	repos := c.AllRepos()
 	mapper := func(name string, repo *git.Repo, res resultChan) {
 		ok, items := repo.IsClean()
@@ -486,21 +505,12 @@ func (c *Crowbar) is_clean() (ok bool, results resultTokens) {
 		tok.name, tok.ok, tok.results = name, ok, items
 		res <- tok
 	}
-	reducer := func(vals resultChan) (bool, resultTokens) {
-		ok := true
-		res := make(resultTokens, len(repos), len(repos))
-		for i, _ := range res {
-			item := <-vals
-			res[i] = item
-			ok = ok && item.ok
-		}
-		return ok, res
-	}
-	ok, results = repoMapReduce(repos, mapper, reducer)
+	ok, results = repoMapReduce(repos, mapper, makeBasicReducer(len(repos)))
 	return
 }
 
-func (c *Crowbar) currentRelease() Release {
+// Get the current release that this repo set is working in.
+func (c *Crowbar) CurrentRelease() Release {
 	res, found := c.Repo.Get("crowbar.release")
 	if found {
 		return c.Release(res)
@@ -508,7 +518,8 @@ func (c *Crowbar) currentRelease() Release {
 	return nil
 }
 
-func (c *Crowbar) currentBuild() Build {
+// Get the current build that the repo set is working on.
+func (c *Crowbar) CurrentBuild() Build {
 	res, found := c.Repo.Get("crowbar.build")
 	if !found {
 		return nil
@@ -526,6 +537,7 @@ func (c *Crowbar) setBuild(build Build) {
 	c.Repo.Set("crowbar.release", build.Release().Name())
 }
 
+// Rebase local changes on top of changes from upstream fetched by a Fetch.
 func (c *Crowbar) Rebase() (ok bool, res resultTokens) {
 	repos := c.AllRepos()
 	log.Println("Rebasing local branches on remote tracking branches")
@@ -548,27 +560,18 @@ func (c *Crowbar) Rebase() (ok bool, res resultTokens) {
 		}
 		res <- tok
 	}
-	reducer := func(vals resultChan) (ok bool, res resultTokens) {
-		res = make(resultTokens, len(repos), len(repos))
-		ok = true
-		for i, _ := range res {
-			item := <-vals
-			res[i] = item
-			ok = ok && item.ok
-		}
-		return
-	}
-	ok, res = repoMapReduce(repos, mapper, reducer)
+	ok, res = repoMapReduce(repos, mapper, makeBasicReducer(len(repos)))
 	return
 }
 
-func (c *Crowbar) barclampsInBuild(build Build) BarclampMap {
+// Get a list of barclamps in a specific Build.
+func (c *Crowbar) BarclampsInBuild(build Build) BarclampMap {
 	if build == nil {
 		log.Panicf("Cannot get barclamps of a nil Build!")
 	}
 	var res BarclampMap
 	if build.Parent() != nil {
-		res = c.barclampsInBuild(build.Parent())
+		res = c.BarclampsInBuild(build.Parent())
 	} else {
 		res = make(BarclampMap)
 	}
@@ -578,6 +581,8 @@ func (c *Crowbar) barclampsInBuild(build Build) BarclampMap {
 	return res
 }
 
+// Switch a repository to the empty branch, which will be created
+// if it does not exist.
 func switchToEmptyBranch(r *git.Repo) error {
 	contents := bytes.NewBufferString("This branch intentionally left blank\n")
 	readme := filepath.Join(r.WorkDir, "README.empty-branch")
@@ -610,8 +615,9 @@ func switchToEmptyBranch(r *git.Repo) error {
 	return nil
 }
 
+// Switch the barclamps to the proper branches for a specific build.
 func (c *Crowbar) Switch(build Build) (ok bool, res resultTokens) {
-	newBarclamps := c.barclampsInBuild(build)
+	newBarclamps := c.BarclampsInBuild(build)
 	// Build a map of barclamp name -> target branches
 	barclampTargets := make(map[string]string)
 	for name, _ := range c.Barclamps {
@@ -643,17 +649,7 @@ func (c *Crowbar) Switch(build Build) (ok bool, res resultTokens) {
 		}
 		res <- tok
 	}
-	reducer := func(vals resultChan) (ok bool, res resultTokens) {
-		res = make(resultTokens, len(barclampTargets), len(barclampTargets))
-		ok = true
-		for i, _ := range res {
-			item := <-vals
-			ok = ok && item.ok
-			res[i] = item
-		}
-		return
-	}
-	ok, res = repoMapReduce(c.Barclamps, mapper, reducer)
+	ok, res = repoMapReduce(c.Barclamps, mapper, makeBasicReducer(len(barclampTargets)))
 	if ok {
 		c.setBuild(build)
 		build.FinalizeSwitch()
@@ -668,17 +664,16 @@ func ShowCrowbar(cmd *commander.Command, args []string) {
 
 func Fetch(cmd *commander.Command, args []string) {
 	c := mustFindCrowbar("")
-	ok, _ := c.fetch(nil)
-	if ok {
-		log.Printf("All updates fetched.\n")
-		os.Exit(0)
+	ok, _ := c.Fetch(nil)
+	if !ok {
+		os.Exit(1)
 	}
-	os.Exit(1)
+	log.Printf("All updates fetched.\n")
 }
 
 func Sync(cmd *commander.Command, args []string) {
 	c := mustFindCrowbar("")
-	ok, _ := c.is_clean()
+	ok, _ := c.IsClean()
 	if !ok {
 		log.Printf("Cannot rebase local changes, Crowbar is not clean.\n")
 		IsClean(cmd, args)
@@ -697,7 +692,7 @@ func Sync(cmd *commander.Command, args []string) {
 
 func IsClean(cmd *commander.Command, args []string) {
 	c := mustFindCrowbar("")
-	ok, items := c.is_clean()
+	ok, items := c.IsClean()
 	if ok {
 		log.Println("All Crowbar repositories are clean.")
 		os.Exit(0)
@@ -716,12 +711,12 @@ func IsClean(cmd *commander.Command, args []string) {
 
 func ShowRelease(cmd *commander.Command, args []string) {
 	c := mustFindCrowbar("")
-	fmt.Println(c.currentRelease().Name())
+	fmt.Println(c.CurrentRelease().Name())
 }
 
 func ShowBuild(cmd *commander.Command, args []string) {
 	c := mustFindCrowbar("")
-	fmt.Println(c.currentBuild().FullName())
+	fmt.Println(c.CurrentBuild().FullName())
 }
 
 func Releases(cmd *commander.Command, args []string) {
@@ -740,8 +735,8 @@ func Builds(cmd *commander.Command, args []string) {
 	c := mustFindCrowbar("")
 	res := make([]string, 0, 20)
 	if len(args) == 0 {
-		for build, _ := range c.currentRelease().Builds() {
-			res = append(res, c.currentRelease().Name()+"/"+build)
+		for build, _ := range c.CurrentRelease().Builds() {
+			res = append(res, c.CurrentRelease().Name()+"/"+build)
 		}
 	} else {
 		for _, release := range args {
@@ -762,7 +757,7 @@ func BarclampsInBuild(cmd *commander.Command, args []string) {
 	var build Build
 	var found bool
 	if len(args) == 0 {
-		build = c.currentBuild()
+		build = c.CurrentBuild()
 	} else if len(args) == 1 {
 		builds := c.Builds()
 		build, found = builds[args[0]]
@@ -770,7 +765,7 @@ func BarclampsInBuild(cmd *commander.Command, args []string) {
 			log.Fatalln("No such build %s", args[0])
 		}
 	}
-	for name, _ := range c.barclampsInBuild(build) {
+	for name, _ := range c.BarclampsInBuild(build) {
 		res = append(res, name)
 	}
 	sort.Strings(res)
@@ -781,11 +776,11 @@ func BarclampsInBuild(cmd *commander.Command, args []string) {
 
 func Switch(cmd *commander.Command, args []string) {
 	c := mustFindCrowbar("")
-	if ok, _ := c.is_clean(); !ok {
+	if ok, _ := c.IsClean(); !ok {
 		log.Fatalln("Crowbar is not clean, cannot switch builds.")
 	}
 	rels := c.Releases()
-	current := c.currentBuild()
+	current := c.CurrentBuild()
 	var target Build
 	found := false
 	switch len(args) {
@@ -823,6 +818,11 @@ func Switch(cmd *commander.Command, args []string) {
 	log.Printf("Failed to switch to %s!\n", target.FullName())
 	ok, _ = c.Switch(current)
 	os.Exit(1)
+}
+
+func Update(cmd *commander.Command, args []string) {
+	Fetch(cmd, args)
+	Sync(cmd, args)
 }
 
 func init() {
@@ -875,6 +875,11 @@ func init() {
 		Run:       Switch,
 		UsageLine: "switch",
 		Short:     "Switch to the named release or build",
+	})
+	commands.AddCommand(nil, &commander.Command{
+		Run:       Update,
+		UsageLine: "update",
+		Short:     "Fetch all changes from upstream and then rebase local changes on top of them.",
 	})
 
 	return
