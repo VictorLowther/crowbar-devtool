@@ -99,6 +99,21 @@ func (b *FlatBuild) Barclamps() BarclampMap {
 	return b.barclamps
 }
 
+// Perform switch finalization for FlatMetadata.
+// Currently, this involves recreating the extras and change-image symlinks.
+func (b *FlatBuild) FinalizeSwitch() {
+	pwd, err := os.Getwd()
+	if err != nil {
+		log.Panic(err)
+	}
+	defer os.Chdir(pwd)
+	os.Chdir(b.release.meta.crowbar.Repo.WorkDir)
+	for _, link := range []string{"change-image", "extra"} {
+		os.Remove(link)
+		os.Symlink(filepath.Join(b.path(), link), link)
+	}
+}
+
 // Get a list of releases that this metadata knows about
 func (m *FlatMetadata) Releases() ReleaseMap {
 	if m.releases == nil {

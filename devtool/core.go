@@ -53,6 +53,9 @@ type Build interface {
 	// build (which holds the core Crowbar barclamps, and has no parent),
 	// and all other builds in a release are children of another build.
 	Parent() Build
+	// Perform whatver metadata-specific tasks are needed to
+	// finaize a switch operation.
+	FinalizeSwitch()
 }
 
 type BuildMap map[string]Build
@@ -627,7 +630,7 @@ func (c *Crowbar) Switch(build Build) (ok bool, res resultTokens) {
 			tok.ok = false
 			tok.results = err
 		} else if current.Name() != targetBranch {
-			tok.results = fmt.Errorf("Switched %s to %s",current.Name(),targetBranch)
+			tok.results = fmt.Errorf("Switched %s to %s", current.Name(), targetBranch)
 			if targetBranch == "empty-branch" {
 				if err = switchToEmptyBranch(repo); err != nil {
 					tok.ok = false
@@ -653,6 +656,7 @@ func (c *Crowbar) Switch(build Build) (ok bool, res resultTokens) {
 	ok, res = repoMapReduce(c.Barclamps, mapper, reducer)
 	if ok {
 		c.setBuild(build)
+		build.FinalizeSwitch()
 	}
 	return
 }
@@ -791,7 +795,7 @@ func Switch(cmd *commander.Command, args []string) {
 		// Were we passed a known release?
 		rel, found_rel := rels[args[0]]
 		if found_rel {
-			for _,build := range []string{current.Name(), "master"} {
+			for _, build := range []string{current.Name(), "master"} {
 				target, found = rel.Builds()[build]
 				if found {
 					break
@@ -806,18 +810,18 @@ func Switch(cmd *commander.Command, args []string) {
 	if !found {
 		log.Fatalf("%s is not anything we can switch to!")
 	}
-	ok,tokens := c.Switch(target)
-	for _,tok := range tokens {
+	ok, tokens := c.Switch(target)
+	for _, tok := range tokens {
 		if tok.results != nil {
-			log.Printf("%s: %v\n",tok.name,tok.results)
+			log.Printf("%s: %v\n", tok.name, tok.results)
 		}
 	}
 	if ok {
-		log.Printf("Switched to %s\n",target.FullName())
+		log.Printf("Switched to %s\n", target.FullName())
 		os.Exit(0)
 	}
-	log.Printf("Failed to switch to %s!\n",target.FullName())
-	ok,_ = c.Switch(current)
+	log.Printf("Failed to switch to %s!\n", target.FullName())
+	ok, _ = c.Switch(current)
 	os.Exit(1)
 }
 
