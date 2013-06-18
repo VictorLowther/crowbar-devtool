@@ -9,6 +9,7 @@ import (
 	"log"
 	"os"
 	"sort"
+	"strings"
 	"strconv"
 )
 
@@ -246,6 +247,51 @@ func ZapRemote(cmd *commander.Command, args []string) {
 	c.ZapRemote(remote)
 }
 
+func ZapBuild(cmd *commander.Command, args []string) {
+	if len(args) != 1 {
+		log.Fatalf("remove-build only accepts one argument!\n")
+	}
+	buildName := args[0]
+	c := devtool.MustFindCrowbar("")
+	if !strings.Contains(buildName,"/") {
+		// We were passed what appears to be a raw build name.
+		// Turn it into a real build by prepending the release name.
+			buildName = c.CurrentRelease().Name() + "/" + buildName
+	}
+	builds := c.Builds()
+	build,found := builds[buildName]
+	if !found {
+		log.Fatalf("%s is not a build, cannot delete it!",buildName)
+	}
+	if strings.HasSuffix(buildName,"/master") {
+		log.Fatalf("Cannot delete the master build in a release!")
+	}
+	if err := build.Zap(); err != nil {
+		log.Fatal(err)
+	}
+	log.Printf("Build %s deleted.\n",buildName)
+}
+
+func ZapRelease(cmd *commander.Command, args []string) {
+	if len(args) != 1 {
+		log.Fatalf("remove-release only accepts one argument!")
+	}
+	c := devtool.MustFindCrowbar("")
+	releaseName := args[0]
+	releases := c.Releases()
+	release,found := releases[releaseName]
+	if !found {
+		log.Fatalf("%s is not a release!\n",releaseName)
+	}
+	if releaseName == "development" {
+		log.Fatal("Cannot delete the development release.")
+	}
+	if err := release.Zap(); err != nil {
+		log.Fatal(err)
+	}
+	log.Printf("Release %s deleted.\n",releaseName)
+}
+
 func RenameRemote(cmd *commander.Command, args []string) {
 	if len(args) != 2 {
 		log.Fatalf("remote rename takes exactly 2 arguments.\n")
@@ -378,6 +424,16 @@ and exits with an exit code of 1.`,
 		Run:       Update,
 		UsageLine: "update",
 		Short:     "Fetch all changes from upstream and then rebase local changes on top of them.",
+	})
+	addCommand(nil, &commander.Command{
+		Run: ZapBuild,
+		UsageLine: "remove-build [build]",
+		Short: "Remove a non-master build with no children.",
+	})
+	addCommand(nil, &commander.Command{
+		Run: ZapRelease,
+		UsageLine: "remove-release [release]",
+		Short: "Remove a release",
 	})
 	// Remote Management commands.
 	remote := addSubCommand(nil, &commander.Commander{

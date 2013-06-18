@@ -53,6 +53,9 @@ type Build interface {
 	// Perform whatver metadata-specific tasks are needed to
 	// finaize a switch operation.
 	FinalizeSwitch()
+	// Remove a  build.  The build must not be named "master", and the
+	// build must not have any children.
+	Zap() error
 }
 
 type BuildMap map[string]Build
@@ -68,6 +71,8 @@ type Release interface {
 	// The parent of this release.
 	// We may return nil if there is no parent.
 	Parent() Release
+	// Remove a release.  You cannot remove the development release.
+	Zap() error
 }
 
 type ReleaseMap map[string]Release
@@ -80,8 +85,6 @@ type Metadata interface {
 	// All the releases that this metadata source knows about.
 	Releases() ReleaseMap
 	// All the builds that this metadata source knows about.
-	AllBuilds() BuildMap
-	// Test to see if Crowbar is using this metadata.
 	Probe(*Crowbar) error
 }
 
@@ -206,6 +209,11 @@ func MustFindCrowbar(path string) *Crowbar {
 	dieIfError(err)
 	return res
 }
+// Given a path, chop off the prefix if it matches the path to our working dir.
+func (c *Crowbar)RelPath(path string) string {
+	return strings.TrimPrefix(filepath.Clean(path),
+		filepath.Clean(c.Repo.WorkDir) + "/")
+}
 
 // Get all the releases we know about.
 func (c *Crowbar) Releases() ReleaseMap {
@@ -214,7 +222,13 @@ func (c *Crowbar) Releases() ReleaseMap {
 
 // Get all of the builds we know how to build.
 func (c *Crowbar) Builds() BuildMap {
-	return c.Meta.AllBuilds()
+	res := make(BuildMap)
+	for _,rel := range c.Releases() {
+		for _,bld := range rel.Builds() {
+			res[bld.FullName()]=bld
+		}
+	}
+	return res
 }
 
 // Get a specific release.

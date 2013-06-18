@@ -13,7 +13,7 @@ import (
 // Base type for representing flat metadata.
 type FlatMetadata struct {
 	path     string
-	releases ReleaseMap
+	releases map[string]*FlatRelease
 	crowbar  *Crowbar
 }
 
@@ -21,7 +21,7 @@ type FlatMetadata struct {
 type FlatRelease struct {
 	name, parent string
 	meta         *FlatMetadata
-	builds       BuildMap
+	builds       map[string]*FlatBuild
 }
 
 // How to find the pointer to where the on-disk metadata for this release lives.
@@ -36,23 +36,76 @@ func (r *FlatRelease) Name() string {
 
 // Get a map of builds for a specific release.
 // They will be indexed in the returned BuildMap y build.Name()
-func (r *FlatRelease) Builds() BuildMap {
+func (r *FlatRelease) Builds() (res BuildMap) {
+	res = make(BuildMap)
 	if r.builds == nil {
 		log.Panicf("Release %s has no builds.", r.name)
 	}
-	return r.builds
+	for name,build := range r.builds {
+		res[name]=build
+	}
+	return res
+}
+
+func (r *FlatRelease) lookupParent() (res *FlatRelease) {
+	if r.parent == "" {
+		return nil
+	}
+	if res := r.meta.releases[r.parent]; res != nil {
+		return res
+	}
+	log.Panicf("Parent release %s of %s does not exist!", r.parent, r.name)
+	return nil
 }
 
 // Find the parent release of this release.
 // If there isn't one, return nil.
 func (r *FlatRelease) Parent() Release {
-	if r.parent == "" {
-		return nil
+	return Release(r.lookupParent())
+}
+
+// Sets target to be the new parent of r.
+func (r *FlatRelease) SetParent(target *FlatRelease) error {
+	buf := bytes.NewBufferString(target.name)
+	if err := ioutil.WriteFile(filepath.Join(r.path(),"parent"),
+		buf.Bytes(),
+		os.FileMode(0644)); err != nil {
+		return err
 	}
-	if r.meta.releases[r.parent] == nil {
-		log.Panicf("Parent release %s of %s does not exist!", r.parent, r.name)
+	relpath := r.meta.crowbar.RelPath(r.path())
+	cmd,_,_ := r.meta.crowbar.Repo.Git("add",relpath)
+	if err := cmd.Run(); err != nil {
+		return err
 	}
-	return r.meta.releases[r.parent]
+	commitmsg := fmt.Sprint("Set parent of %s to %s",r.name,target.name)
+	cmd,_,_ = r.meta.crowbar.Repo.Git("commit","-m",commitmsg)
+	if err := cmd.Run(); err != nil {
+		return err
+	}
+	return nil
+}
+
+
+// Zap a release.  It will reparent any child releases.
+func (r *FlatRelease) Zap() error {
+	for _, release := range r.meta.releases {
+		if release.parent == r.name {
+			// Reparent any child releases.
+			release.SetParent(r.lookupParent())
+		}
+	}
+	relpath := r.meta.crowbar.RelPath(r.path())
+	cmd, _, _ := r.meta.crowbar.Repo.Git("rm", "-rf", relpath)
+	if err := cmd.Run(); err != nil {
+		return err
+	}
+	cmd, _, _ = r.meta.crowbar.Repo.Git("commit", "-m", "Removed release "+r.Name())
+	if err := cmd.Run(); err != nil {
+		return err
+	}
+	delete(r.meta.releases,r.name)
+	r = nil
+	return nil
 }
 
 // How we represent a build in the flat metadata.
@@ -83,7 +136,7 @@ func (b *FlatBuild) Release() Release {
 	if b.release == nil {
 		log.Panicf("Build %s is not a member of any release!", b.name)
 	}
-	return b.release
+	return Release(b.release)
 }
 
 // The parent build of this one.
@@ -91,11 +144,12 @@ func (b *FlatBuild) Parent() Build {
 	if b.parent == "" {
 		return nil
 	}
-	if b.release.builds[b.parent] == nil {
-		log.Panicf("Release %s: cannot find parent build %s of build %s!",
-			b.release.name, b.parent, b.name)
+	if res := b.release.builds[b.parent]; res != nil {
+		return Build(res)
 	}
-	return b.release.builds[b.parent]
+	log.Panicf("Release %s: cannot find parent build %s of build %s!",
+		b.release.name, b.parent, b.name)
+	return nil
 }
 
 // The barclamps that are a part of this build.
@@ -118,27 +172,53 @@ func (b *FlatBuild) FinalizeSwitch() {
 	}
 }
 
+// Zap a build.  This erases the build metadata from the disk.
+func (b *FlatBuild) Zap() error {
+	for _, build := range b.release.builds {
+		if build.parent == b.name {
+			return fmt.Errorf("Cannot delete build with active children!")
+		}
+	}
+	cb_path := filepath.Clean(b.release.meta.crowbar.Repo.WorkDir) + "/"
+	relpath := strings.TrimPrefix(b.path(), cb_path)
+	cmd, _, _ := b.release.meta.crowbar.Repo.Git("rm", "-rf", relpath)
+	if err := cmd.Run(); err != nil {
+		return err
+	}
+	cmd, _, _ = b.release.meta.crowbar.Repo.Git("commit", "-m", "Removed build "+b.FullName())
+	if err := cmd.Run(); err != nil {
+		return err
+	}
+	delete(b.release.builds,b.name)
+	b = nil
+	return nil
+}
+
 // Get a list of releases that this metadata knows about
 func (m *FlatMetadata) Releases() ReleaseMap {
+	res := make(ReleaseMap)
 	if m.releases == nil {
 		log.Panicf("No releases available")
 	}
-	return m.releases
+	for name,rel := range m.releases {
+		res[name]=rel
+	}
+	return res
 }
 
 // Get a list of all the builds this metadata knows about.
 // The returned BuildMap will have build.FullName() keys.
-func (m *FlatMetadata) AllBuilds() BuildMap {
-	res := make(BuildMap)
-	for _, rel := range m.Releases() {
-		for _, bld := range rel.Builds() {
+func (m *FlatMetadata) AllBuilds() map[string]*FlatBuild {
+	res := make(map[string]*FlatBuild)
+	for _, rel := range m.releases {
+		for _, bld := range rel.builds {
 			res[bld.FullName()] = bld
 		}
 	}
 	return res
 }
 
-func (m *FlatMetadata) populateBuild(release *FlatRelease, name string) Build {
+func (m *FlatMetadata) populateBuild(release *FlatRelease, name string) *FlatBuild {
 	build := &FlatBuild{
 		name:      name,
 		release:   release,
@@ -185,7 +265,7 @@ func (m *FlatMetadata) populateRelease(rel string) *FlatRelease {
 	release := &FlatRelease{
 		meta:   m,
 		name:   rel,
-		builds: make(BuildMap),
+		builds: make(map[string]*FlatBuild),
 	}
 	prefix := release.path()
 	glob := filepath.Join(prefix, "*/")
@@ -213,7 +293,7 @@ func (m *FlatMetadata) populateRelease(rel string) *FlatRelease {
 func (m *FlatMetadata) Probe(c *Crowbar) (err error) {
 	m.path = filepath.Join(c.Repo.Path(), "releases")
 	m.crowbar = c
-	m.releases = make(ReleaseMap)
+	m.releases = make(map[string]*FlatRelease)
 	stat, err := os.Lstat(m.path)
 	if err != nil {
 		return fmt.Errorf("Cannot find %s, metadata cannot be flat.", m.path)
