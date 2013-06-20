@@ -3,6 +3,7 @@ package devtool
 import (
 	"bytes"
 	"fmt"
+	"io"
 	"io/ioutil"
 	"log"
 	"os"
@@ -14,7 +15,6 @@ import (
 type FlatMetadata struct {
 	path     string
 	releases map[string]*FlatRelease
-	crowbar  *Crowbar
 }
 
 // How we represent a release in the flat metadata.
@@ -41,8 +41,8 @@ func (r *FlatRelease) Builds() (res BuildMap) {
 	if r.builds == nil {
 		log.Panicf("Release %s has no builds.", r.name)
 	}
-	for name,build := range r.builds {
-		res[name]=build
+	for name, build := range r.builds {
+		res[name] = build
 	}
 	return res
 }
@@ -67,24 +67,23 @@ func (r *FlatRelease) Parent() Release {
 // Sets target to be the new parent of r.
 func (r *FlatRelease) SetParent(target *FlatRelease) error {
 	buf := bytes.NewBufferString(target.name)
-	if err := ioutil.WriteFile(filepath.Join(r.path(),"parent"),
+	if err := ioutil.WriteFile(filepath.Join(r.path(), "parent"),
 		buf.Bytes(),
 		os.FileMode(0644)); err != nil {
 		return err
 	}
-	relpath := r.meta.crowbar.RelPath(r.path())
-	cmd,_,_ := r.meta.crowbar.Repo.Git("add",relpath)
+	relpath := RelPath(r.path())
+	cmd, _, _ := Repo.Git("add", relpath)
 	if err := cmd.Run(); err != nil {
 		return err
 	}
-	commitmsg := fmt.Sprint("Set parent of %s to %s",r.name,target.name)
-	cmd,_,_ = r.meta.crowbar.Repo.Git("commit","-m",commitmsg)
+	commitmsg := fmt.Sprint("Set parent of %s to %s", r.name, target.name)
+	cmd, _, _ = Repo.Git("commit", "-m", commitmsg)
 	if err := cmd.Run(); err != nil {
 		return err
 	}
 	return nil
 }
-
 
 // Zap a release.  It will reparent any child releases.
 func (r *FlatRelease) Zap() error {
@@ -94,18 +93,93 @@ func (r *FlatRelease) Zap() error {
 			release.SetParent(r.lookupParent())
 		}
 	}
-	relpath := r.meta.crowbar.RelPath(r.path())
-	cmd, _, _ := r.meta.crowbar.Repo.Git("rm", "-rf", relpath)
+	relpath := RelPath(r.path())
+	cmd, _, _ := Repo.Git("rm", "-rf", relpath)
 	if err := cmd.Run(); err != nil {
 		return err
 	}
-	cmd, _, _ = r.meta.crowbar.Repo.Git("commit", "-m", "Removed release "+r.Name())
+	cmd, _, _ = Repo.Git("commit", "-m", "Removed release "+r.Name())
 	if err := cmd.Run(); err != nil {
 		return err
 	}
-	delete(r.meta.releases,r.name)
+	delete(r.meta.releases, r.name)
 	r = nil
 	return nil
+}
+
+func (r *FlatRelease) Barclamps() (res BarclampMap) {
+	res = make(BarclampMap)
+	for _, build := range r.Builds() {
+		for name, bc := range build.Barclamps() {
+			res[name] = bc
+		}
+	}
+	return res
+}
+
+// Create the flat metadata for a new release.
+// This expects to be called from Crowbar.SplitRelease()
+func (r *FlatRelease) FinalizeSplit(name, branch string) (Release, error) {
+	basePath := r.path()
+	newPath := filepath.Join(r.meta.path, name)
+	branchBuf := bytes.NewBufferString(branch)
+	walker := func(path string, info os.FileInfo, err error) error {
+		dest := filepath.Join(newPath, strings.TrimPrefix(path, basePath))
+		var res error
+		if err != nil {
+			log.Printf("Error walking to %s\n", path)
+			return nil
+		}
+		switch {
+		case (info.Mode() & os.ModeSymlink) > 0:
+			// Recreate the appropriate symlink
+			link, res := os.Readlink(path)
+			if res != nil {
+				return res
+			}
+			res = os.Symlink(link,dest)
+		case info.IsDir():
+			// Make the matching directory in the new release metadata.
+			res = os.MkdirAll(dest, os.FileMode(0755))
+		case info.Mode().IsRegular():
+			if strings.HasPrefix(filepath.Base(path), "barclamp-") {
+				// Create a new barclamp- file with the proper branch information.
+				return ioutil.WriteFile(dest, branchBuf.Bytes(), os.FileMode(0644))
+			}
+			// Copy the file wholesale.
+			src, res := os.Open(path)
+			if res != nil {
+				return res
+			}
+			defer src.Close()
+			dest, res := os.Create(dest)
+			if res != nil {
+				return res
+			}
+			defer dest.Close()
+			_, res = io.Copy(dest, src)
+		}
+		return res
+	}
+	err := os.MkdirAll(newPath, os.FileMode(0755))
+	if err != nil {
+		return nil, err
+	}
+	err = filepath.Walk(basePath, walker)
+	if err != nil {
+		return nil, err
+	}
+	cmd, _, _ := Repo.Git("add", RelPath(newPath))
+	if err = cmd.Run(); err != nil {
+		return nil, fmt.Errorf("Could not add new release %s in Git", name)
+	}
+	cmd, _, _ = Repo.Git("commit", "-m", fmt.Sprintf("Added new release %s", name))
+	if err = cmd.Run(); err != nil {
+		return nil, fmt.Errorf("Could not commit addition of new release %s", name)
+	}
+	rel := r.meta.populateRelease(name)
+	r.meta.releases[name] = rel
+	return Release(rel), nil
 }
 
 // How we represent a build in the flat metadata.
@@ -165,7 +239,7 @@ func (b *FlatBuild) FinalizeSwitch() {
 		log.Panic(err)
 	}
 	defer os.Chdir(pwd)
-	os.Chdir(b.release.meta.crowbar.Repo.WorkDir)
+	os.Chdir(Repo.WorkDir)
 	for _, link := range []string{"change-image", "extra"} {
 		os.Remove(link)
 		os.Symlink(filepath.Join(b.path(), link), link)
@@ -179,17 +253,17 @@ func (b *FlatBuild) Zap() error {
 			return fmt.Errorf("Cannot delete build with active children!")
 		}
 	}
-	cb_path := filepath.Clean(b.release.meta.crowbar.Repo.WorkDir) + "/"
+	cb_path := filepath.Clean(Repo.WorkDir) + "/"
 	relpath := strings.TrimPrefix(b.path(), cb_path)
-	cmd, _, _ := b.release.meta.crowbar.Repo.Git("rm", "-rf", relpath)
+	cmd, _, _ := Repo.Git("rm", "-rf", relpath)
 	if err := cmd.Run(); err != nil {
 		return err
 	}
-	cmd, _, _ = b.release.meta.crowbar.Repo.Git("commit", "-m", "Removed build "+b.FullName())
+	cmd, _, _ = Repo.Git("commit", "-m", "Removed build "+b.FullName())
 	if err := cmd.Run(); err != nil {
 		return err
 	}
-	delete(b.release.builds,b.name)
+	delete(b.release.builds, b.name)
 	b = nil
 	return nil
 }
@@ -200,8 +274,8 @@ func (m *FlatMetadata) Releases() ReleaseMap {
 	if m.releases == nil {
 		log.Panicf("No releases available")
 	}
-	for name,rel := range m.releases {
-		res[name]=rel
+	for name, rel := range m.releases {
+		res[name] = rel
 	}
 	return res
 }
@@ -235,21 +309,20 @@ func (m *FlatMetadata) populateBuild(release *FlatRelease, name string) *FlatBui
 	}
 	glob := filepath.Join(bld, "barclamp-*")
 	barclamps, err := filepath.Glob(glob)
-	c := release.meta.crowbar
 	dieIfError(err)
 	for _, bc := range barclamps {
 		barclamp := &Barclamp{}
 		barclamp.Name = strings.TrimPrefix(bc, filepath.Join(bld, "barclamp-"))
-		if c.Barclamps[barclamp.Name] == nil {
+		if Barclamps[barclamp.Name] == nil {
 			log.Panicf("Build %s/%s wants %s, which is not in %s\n",
 				release.name,
 				build.name,
 				barclamp.Name,
-				filepath.Join(c.Repo.Path(),
+				filepath.Join(Repo.Path(),
 					"barclamps",
 					barclamp.Name))
 		}
-		barclamp.Repo = c.Barclamps[barclamp.Name]
+		barclamp.Repo = Barclamps[barclamp.Name]
 		branch, err := ioutil.ReadFile(bc)
 		if err != nil {
 			continue
@@ -290,9 +363,8 @@ func (m *FlatMetadata) populateRelease(rel string) *FlatRelease {
 }
 
 // Populate the Releases field of a Crowbar struct, if we are using flat metadata.
-func (m *FlatMetadata) Probe(c *Crowbar) (err error) {
-	m.path = filepath.Join(c.Repo.Path(), "releases")
-	m.crowbar = c
+func (m *FlatMetadata) Probe() (err error) {
+	m.path = filepath.Join(Repo.Path(), "releases")
 	m.releases = make(map[string]*FlatRelease)
 	stat, err := os.Lstat(m.path)
 	if err != nil {

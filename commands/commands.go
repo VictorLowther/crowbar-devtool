@@ -35,13 +35,13 @@ func addSubCommand(parent *commander.Commander, subcmd *commander.Commander) *co
 }
 
 func ShowCrowbar(cmd *commander.Command, args []string) {
-	r := devtool.MustFindCrowbar("")
-	log.Printf("Crowbar is located at: %s\n", r.Repo.Path())
+	devtool.MustFindCrowbar()
+	log.Printf("Crowbar is located at: %s\n", devtool.Repo.Path())
 }
 
 func Fetch(cmd *commander.Command, args []string) {
-	c := devtool.MustFindCrowbar("")
-	ok, _ := c.Fetch(nil)
+	devtool.MustFindCrowbar()
+	ok, _ := devtool.Fetch(nil)
 	if !ok {
 		os.Exit(1)
 	}
@@ -49,13 +49,13 @@ func Fetch(cmd *commander.Command, args []string) {
 }
 
 func Sync(cmd *commander.Command, args []string) {
-	c := devtool.MustFindCrowbar("")
-	ok, _ := c.IsClean()
+	devtool.MustFindCrowbar()
+	ok, _ := devtool.IsClean()
 	if !ok {
 		log.Printf("Cannot rebase local changes, Crowbar is not clean.\n")
 		IsClean(cmd, args)
 	}
-	ok, res := c.Rebase()
+	ok, res := devtool.Rebase()
 	if ok {
 		log.Println("All local changes rebased against upstream.")
 		os.Exit(0)
@@ -68,8 +68,8 @@ func Sync(cmd *commander.Command, args []string) {
 }
 
 func IsClean(cmd *commander.Command, args []string) {
-	c := devtool.MustFindCrowbar("")
-	ok, items := c.IsClean()
+	devtool.MustFindCrowbar()
+	ok, items := devtool.IsClean()
 	if ok {
 		log.Println("All Crowbar repositories are clean.")
 		os.Exit(0)
@@ -87,19 +87,19 @@ func IsClean(cmd *commander.Command, args []string) {
 }
 
 func ShowRelease(cmd *commander.Command, args []string) {
-	c := devtool.MustFindCrowbar("")
-	fmt.Println(c.CurrentRelease().Name())
+	devtool.MustFindCrowbar()
+	fmt.Println(devtool.CurrentRelease().Name())
 }
 
 func ShowBuild(cmd *commander.Command, args []string) {
-	c := devtool.MustFindCrowbar("")
-	fmt.Println(c.CurrentBuild().FullName())
+	devtool.MustFindCrowbar()
+	fmt.Println(devtool.CurrentBuild().FullName())
 }
 
 func Releases(cmd *commander.Command, args []string) {
-	c := devtool.MustFindCrowbar("")
+	devtool.MustFindCrowbar()
 	res := make([]string, 0, 20)
-	for release, _ := range c.Releases() {
+	for release, _ := range devtool.Releases() {
 		res = append(res, release)
 	}
 	sort.Strings(res)
@@ -109,15 +109,15 @@ func Releases(cmd *commander.Command, args []string) {
 }
 
 func Builds(cmd *commander.Command, args []string) {
-	c := devtool.MustFindCrowbar("")
+	devtool.MustFindCrowbar()
 	res := make([]string, 0, 20)
 	if len(args) == 0 {
-		for build, _ := range c.CurrentRelease().Builds() {
-			res = append(res, c.CurrentRelease().Name()+"/"+build)
+		for build, _ := range devtool.CurrentRelease().Builds() {
+			res = append(res, devtool.CurrentRelease().Name()+"/"+build)
 		}
 	} else {
 		for _, release := range args {
-			for build, _ := range c.Release(release).Builds() {
+			for build, _ := range devtool.GetRelease(release).Builds() {
 				res = append(res, release+"/"+build)
 			}
 		}
@@ -129,20 +129,20 @@ func Builds(cmd *commander.Command, args []string) {
 }
 
 func BarclampsInBuild(cmd *commander.Command, args []string) {
-	c := devtool.MustFindCrowbar("")
+	devtool.MustFindCrowbar()
 	res := make([]string, 0, 20)
 	var build devtool.Build
 	var found bool
 	if len(args) == 0 {
-		build = c.CurrentBuild()
+		build = devtool.CurrentBuild()
 	} else if len(args) == 1 {
-		builds := c.Builds()
+		builds := devtool.Builds()
 		build, found = builds[args[0]]
 		if !found {
 			log.Fatalln("No such build %s", args[0])
 		}
 	}
-	for name, _ := range c.BarclampsInBuild(build) {
+	for name, _ := range devtool.BarclampsInBuild(build) {
 		res = append(res, name)
 	}
 	sort.Strings(res)
@@ -152,12 +152,12 @@ func BarclampsInBuild(cmd *commander.Command, args []string) {
 }
 
 func Switch(cmd *commander.Command, args []string) {
-	c := devtool.MustFindCrowbar("")
-	if ok, _ := c.IsClean(); !ok {
+	devtool.MustFindCrowbar()
+	if ok, _ := devtool.IsClean(); !ok {
 		log.Fatalln("Crowbar is not clean, cannot switch builds.")
 	}
-	rels := c.Releases()
-	current := c.CurrentBuild()
+	rels := devtool.Releases()
+	current := devtool.CurrentBuild()
 	var target devtool.Build
 	found := false
 	switch len(args) {
@@ -174,7 +174,7 @@ func Switch(cmd *commander.Command, args []string) {
 				}
 			}
 		} else {
-			target, found = c.Builds()[args[0]]
+			target, found = devtool.Builds()[args[0]]
 		}
 	default:
 		log.Fatalf("switch takes 0 or 1 argument.")
@@ -182,7 +182,7 @@ func Switch(cmd *commander.Command, args []string) {
 	if !found {
 		log.Fatalf("%s is not anything we can switch to!")
 	}
-	ok, tokens := c.Switch(target)
+	ok, tokens := devtool.Switch(target)
 	for _, tok := range tokens {
 		if tok.Results != nil {
 			log.Printf("%s: %v\n", tok.Name, tok.Results)
@@ -193,7 +193,7 @@ func Switch(cmd *commander.Command, args []string) {
 		os.Exit(0)
 	}
 	log.Printf("Failed to switch to %s!\n", target.FullName())
-	ok, _ = c.Switch(current)
+	ok, _ = devtool.Switch(current)
 	os.Exit(1)
 }
 
@@ -227,11 +227,11 @@ func AddRemote(cmd *commander.Command, args []string) {
 		log.Fatalf("Adding a remote takes at least 1 and most 3 parameters!")
 	}
 	devtool.ValidateRemote(remote)
-	c := devtool.MustFindCrowbar("")
-	if c.Remotes[remote.Name] != nil {
+	devtool.MustFindCrowbar()
+	if devtool.Remotes[remote.Name] != nil {
 		log.Fatalf("%s is already a Crowbar remote.", remote.Name)
 	}
-	c.AddRemote(remote)
+	devtool.AddRemote(remote)
 	os.Exit(0)
 }
 
@@ -239,12 +239,12 @@ func ZapRemote(cmd *commander.Command, args []string) {
 	if len(args) != 1 {
 		log.Fatalf("remote rm only accepts one argument!\n")
 	}
-	c := devtool.MustFindCrowbar("")
-	remote, found := c.Remotes[args[0]]
+	devtool.MustFindCrowbar()
+	remote, found := devtool.Remotes[args[0]]
 	if !found {
 		log.Fatalf("%s is not a remote!\n", args[0])
 	}
-	c.ZapRemote(remote)
+	devtool.ZapRemote(remote)
 }
 
 func ZapBuild(cmd *commander.Command, args []string) {
@@ -252,13 +252,13 @@ func ZapBuild(cmd *commander.Command, args []string) {
 		log.Fatalf("remove-build only accepts one argument!\n")
 	}
 	buildName := args[0]
-	c := devtool.MustFindCrowbar("")
+	devtool.MustFindCrowbar()
 	if !strings.Contains(buildName,"/") {
 		// We were passed what appears to be a raw build name.
 		// Turn it into a real build by prepending the release name.
-			buildName = c.CurrentRelease().Name() + "/" + buildName
+			buildName = devtool.CurrentRelease().Name() + "/" + buildName
 	}
-	builds := c.Builds()
+	builds := devtool.Builds()
 	build,found := builds[buildName]
 	if !found {
 		log.Fatalf("%s is not a build, cannot delete it!",buildName)
@@ -276,9 +276,9 @@ func ZapRelease(cmd *commander.Command, args []string) {
 	if len(args) != 1 {
 		log.Fatalf("remove-release only accepts one argument!")
 	}
-	c := devtool.MustFindCrowbar("")
+	devtool.MustFindCrowbar()
 	releaseName := args[0]
-	releases := c.Releases()
+	releases := devtool.Releases()
 	release,found := releases[releaseName]
 	if !found {
 		log.Fatalf("%s is not a release!\n",releaseName)
@@ -292,24 +292,36 @@ func ZapRelease(cmd *commander.Command, args []string) {
 	log.Printf("Release %s deleted.\n",releaseName)
 }
 
+func SplitRelease(cmd *commander.Command, args []string) {
+	if len(args) != 1 {
+		log.Fatalf("split-release only accepts one argument!")
+	}
+	devtool.MustFindCrowbar()
+	current := devtool.CurrentRelease()
+	if _,err := devtool.SplitRelease(current,args[0]); err != nil {
+		log.Println(err)
+		log.Fatalf("Could not split new release %s from %s",args[0],current.Name())
+	}
+}
+
 func RenameRemote(cmd *commander.Command, args []string) {
 	if len(args) != 2 {
 		log.Fatalf("remote rename takes exactly 2 arguments.\n")
 	}
-	c := devtool.MustFindCrowbar("")
-	remote, found := c.Remotes[args[0]]
+	devtool.MustFindCrowbar()
+	remote, found := devtool.Remotes[args[0]]
 	if !found {
 		log.Fatalf("%s is not a Crowbar remote.", args[0])
 	}
-	if _, found = c.Remotes[args[1]]; found {
+	if _, found = devtool.Remotes[args[1]]; found {
 		log.Fatalf("%s is already a remote, cannot rename %s to it\n", args[1], args[0])
 	}
-	c.RenameRemote(remote, args[1])
+	devtool.RenameRemote(remote, args[1])
 }
 
 func UpdateTracking(cmd *commander.Command, args []string) {
-	c := devtool.MustFindCrowbar("")
-	ok, res := c.UpdateTrackingBranches()
+	devtool.MustFindCrowbar()
+	ok, res := devtool.UpdateTrackingBranches()
 	if ok {
 		os.Exit(0)
 	}
@@ -323,19 +335,19 @@ func UpdateTracking(cmd *commander.Command, args []string) {
 }
 
 func ListRemotes(cmd *commander.Command, args []string) {
-	c := devtool.MustFindCrowbar("")
-	for _, remote := range c.SortedRemotes() {
+	devtool.MustFindCrowbar()
+	for _, remote := range devtool.SortedRemotes() {
 		fmt.Printf("%s: urlbase=%s, priority=%d\n", remote.Name, remote.Urlbase, remote.Priority)
 	}
 	os.Exit(0)
 }
 
 func ShowRemote(cmd *commander.Command, args []string) {
-	c := devtool.MustFindCrowbar("")
+	devtool.MustFindCrowbar()
 	if len(args) != 1 {
 		log.Fatal("Need exactly 1 argument.")
 	}
-	remote, found := c.Remotes[args[0]]
+	remote, found := devtool.Remotes[args[0]]
 	if !found {
 		log.Fatalf("%s is not a remote!\n", args[0])
 	}
@@ -344,20 +356,20 @@ func ShowRemote(cmd *commander.Command, args []string) {
 }
 
 func SyncRemotes(cmd *commander.Command, args []string) {
-	c := devtool.MustFindCrowbar("")
-	c.SyncRemotes()
+	devtool.MustFindCrowbar()
+	devtool.SyncRemotes()
 }
 
 func SetRemoteURLBase(cmd *commander.Command, args []string) {
-	c := devtool.MustFindCrowbar("")
+	devtool.MustFindCrowbar()
 	if len(args) != 2 {
 		log.Fatal("Need exactly 2 arguments")
 	}
-	remote, found := c.Remotes[args[0]]
+	remote, found := devtool.Remotes[args[0]]
 	if !found {
 		log.Fatalf("%s is not a remote!\n", args[0])
 	}
-	c.SetRemoteURLBase(remote, args[1])
+	devtool.SetRemoteURLBase(remote, args[1])
 }
 
 func init() {
@@ -435,6 +447,12 @@ and exits with an exit code of 1.`,
 		UsageLine: "remove-release [release]",
 		Short: "Remove a release",
 	})
+	addCommand(nil, &commander.Command{
+		Run: SplitRelease,
+		UsageLine: "new-release [new-name]",
+		Short: "Create a new release from the current release.",
+	})
+
 	// Remote Management commands.
 	remote := addSubCommand(nil, &commander.Commander{
 		Name:  "remote",

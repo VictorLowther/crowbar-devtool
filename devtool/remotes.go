@@ -30,9 +30,9 @@ func (s RemoteSlice) Swap(i, j int) {
 }
 
 // Get the Crowbar remotes, sorted by priority.
-func (c *Crowbar) SortedRemotes() (res RemoteSlice) {
+func SortedRemotes() (res RemoteSlice) {
 	res = make(RemoteSlice, 0, 2)
-	for _, remote := range c.Remotes {
+	for _, remote := range Remotes {
 		res = append(res, remote)
 	}
 	sort.Sort(res)
@@ -40,10 +40,10 @@ func (c *Crowbar) SortedRemotes() (res RemoteSlice) {
 }
 
 // Recreate the tracking branches in the git repositories based on
-// their priorities.  
-func (c *Crowbar) UpdateTrackingBranches() (ok bool, res ResultTokens) {
-	branchMap := c.AllBarclampBranches()
-	remotes := c.SortedRemotes()
+// their priorities.
+func UpdateTrackingBranches() (ok bool, res ResultTokens) {
+	branchMap := AllBarclampBranches()
+	remotes := SortedRemotes()
 	log.Println("Updating local tracking branches.")
 	mapper := func(name string, repo *git.Repo, res resultChan) {
 		tok := makeResultToken()
@@ -82,7 +82,7 @@ func (c *Crowbar) UpdateTrackingBranches() (ok bool, res ResultTokens) {
 		}
 		res <- tok
 	}
-	ok, res = repoMapReduce(c.Barclamps, mapper, makeBasicReducer(len(c.Barclamps)))
+	ok, res = repoMapReduce(Barclamps, mapper, makeBasicReducer(len(Barclamps)))
 	return
 }
 
@@ -99,10 +99,10 @@ func validRemoteName(name string) bool {
 
 // Check to see if the remote passed to this structure is valid.
 // Currently, validity consists of:
-	// remote.Urlbase being a valid URL without any embedded user info.
-	// remote.Ulrbase starting with git, http, https, or ssh.
-	// remote.Name passing validRemoteName
-	// remote.Priority being between 1 and 100
+// remote.Urlbase being a valid URL without any embedded user info.
+// remote.Ulrbase starting with git, http, https, or ssh.
+// remote.Name passing validRemoteName
+// remote.Priority being between 1 and 100
 func ValidateRemote(remote *Remote) bool {
 	url, err := url.Parse(remote.Urlbase)
 	if err != nil {
@@ -147,7 +147,7 @@ func ValidateRemote(remote *Remote) bool {
 	return true
 }
 
-func (c *Crowbar) addRemote(remote *Remote) {
+func addRemote(remote *Remote) {
 	maybeAddRemote := func(repo *git.Repo, reponame string, remote *Remote) {
 		if repo.HasRemote(remote.Name) {
 			log.Printf("%s already has a repo named %s.\n", reponame, remote.Name)
@@ -160,68 +160,68 @@ func (c *Crowbar) addRemote(remote *Remote) {
 			log.Fatalln(err)
 		}
 	}
-	for name, repo := range c.Barclamps {
+	for name, repo := range Barclamps {
 		reponame := "barclamp-" + name
 		maybeAddRemote(repo, reponame, remote)
 	}
-	for name, repo := range c.AllOtherRepos() {
+	for name, repo := range AllOtherRepos() {
 		maybeAddRemote(repo, name, remote)
 	}
 }
 
 // Add a new Crowbar remote to all of the repositories.
-func (c *Crowbar) AddRemote(remote *Remote) {
+func AddRemote(remote *Remote) {
 	if !ValidateRemote(remote) {
 		log.Fatalf("%s failed validation.", remote.Name)
 	}
-	if c.Remotes[remote.Name] != nil {
+	if Remotes[remote.Name] != nil {
 		log.Panicf("Already have a remote named %s\n", remote.Name)
 	}
-	c.Repo.Set("crowbar.remote."+remote.Name+".priority", fmt.Sprint(remote.Priority))
-	c.Repo.Set("crowbar.remote."+remote.Name+".urlbase", remote.Urlbase)
-	c.addRemote(remote)
+	Repo.Set("crowbar.remote."+remote.Name+".priority", fmt.Sprint(remote.Priority))
+	Repo.Set("crowbar.remote."+remote.Name+".urlbase", remote.Urlbase)
+	addRemote(remote)
 }
 
 // Remove an already-existing Crowbar remote to all of the repositories.
-func (c *Crowbar) ZapRemote(remote *Remote) {
-	if c.Remotes[remote.Name] == nil {
+func ZapRemote(remote *Remote) {
+	if Remotes[remote.Name] == nil {
 		log.Panicf("Remote %s already removed!\n", remote.Name)
 	}
-	for _, repo := range c.AllRepos() {
+	for _, repo := range AllRepos() {
 		if !repo.HasRemote(remote.Name) {
 			return
 		}
 		_ = repo.ZapRemote(remote.Name)
 	}
-	c.Repo.Unset("crowbar.remote." + remote.Name + ".priority")
-	c.Repo.Unset("crowbar.remote." + remote.Name + ".urlbase")
+	Repo.Unset("crowbar.remote." + remote.Name + ".priority")
+	Repo.Unset("crowbar.remote." + remote.Name + ".urlbase")
 }
 
 // Rename a remote
-func (c *Crowbar) RenameRemote(remote *Remote, newname string) {
-	if c.Remotes[newname] != nil {
+func RenameRemote(remote *Remote, newname string) {
+	if Remotes[newname] != nil {
 		log.Fatalf("Remote %s already exists, cannot rename %s to it.\n", newname, remote.Name)
 	}
 	if !validRemoteName(newname) {
 		os.Exit(1)
 	}
-	for _, repo := range c.AllRepos() {
+	for _, repo := range AllRepos() {
 		_ = repo.RenameRemote(remote.Name, newname)
 	}
-	c.Repo.Unset("crowbar.remote." + remote.Name + ".priority")
-	c.Repo.Unset("crowbar.remote." + remote.Name + ".urlbase")
-	delete(c.Remotes, remote.Name)
+	Repo.Unset("crowbar.remote." + remote.Name + ".priority")
+	Repo.Unset("crowbar.remote." + remote.Name + ".urlbase")
+	delete(Remotes, remote.Name)
 	remote.Name = newname
-	c.Remotes[remote.Name] = remote
-	c.Repo.Set("crowbar.remote."+remote.Name+".priority", fmt.Sprint(remote.Priority))
-	c.Repo.Set("crowbar.remote."+remote.Name+".urlbase", remote.Urlbase)
+	Remotes[remote.Name] = remote
+	Repo.Set("crowbar.remote."+remote.Name+".priority", fmt.Sprint(remote.Priority))
+	Repo.Set("crowbar.remote."+remote.Name+".urlbase", remote.Urlbase)
 }
 
 // Synchronize remote specifications across all the repositories.
-func (c *Crowbar) SyncRemotes() {
-	for reponame, repo := range c.AllRepos() {
+func SyncRemotes() {
+	for reponame, repo := range AllRepos() {
 		remotes := repo.Remotes()
-		for _, remote := range c.Remotes {
+		for _, remote := range Remotes {
 			repopath := filepath.Join(remote.Urlbase, reponame)
 			if url, found := remotes[remote.Name]; found {
 				continue
@@ -240,11 +240,11 @@ func (c *Crowbar) SyncRemotes() {
 }
 
 // Set a new remote Urlbase.
-func (c *Crowbar) SetRemoteURLBase(remote *Remote, newurl string) {
+func SetRemoteURLBase(remote *Remote, newurl string) {
 	remote.Urlbase = newurl
 	if !ValidateRemote(remote) {
 		log.Fatalf("Refusing to set new URL %s for %s\n", newurl)
 	}
-	c.ZapRemote(remote)
-	c.AddRemote(remote)
+	ZapRemote(remote)
+	AddRemote(remote)
 }

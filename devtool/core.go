@@ -73,6 +73,10 @@ type Release interface {
 	Parent() Release
 	// Remove a release.  You cannot remove the development release.
 	Zap() error
+	// All the barclamps in a release
+	Barclamps() BarclampMap
+	// Metadata operations for finalizing a split of a release
+	FinalizeSplit(string, string) (Release, error)
 }
 
 type ReleaseMap map[string]Release
@@ -85,7 +89,7 @@ type Metadata interface {
 	// All the releases that this metadata source knows about.
 	Releases() ReleaseMap
 	// All the builds that this metadata source knows about.
-	Probe(*Crowbar) error
+	Probe() error
 }
 
 // Track the priority of a Crowbar remote.
@@ -94,16 +98,12 @@ type Remote struct {
 	Urlbase, Name string
 }
 
-// The master struct for managing Crowbar instances.
-type Crowbar struct {
+var (
 	Repo      *git.Repo
 	Barclamps RepoMap
 	Remotes   map[string]*Remote
 	Meta      Metadata
-}
-
-// The current instance of Crowbar we operate on.
-var MemoCrowbar *Crowbar
+)
 
 // If e is of type error, log it as a fatal error and die.
 // Otherwise, don't do anything.
@@ -114,10 +114,7 @@ func dieIfError(e error) {
 }
 
 // Find Crowbar from the current path.
-func findCrowbar(path string) (res *Crowbar, err error) {
-	if MemoCrowbar != nil {
-		return MemoCrowbar, nil
-	}
+func findCrowbar(path string) (err error) {
 	if path == "" {
 		path, err = os.Getwd()
 		dieIfError(err)
@@ -126,27 +123,23 @@ func findCrowbar(path string) (res *Crowbar, err error) {
 	dieIfError(err)
 	repo, err := git.Open(path)
 	if err != nil {
-		return nil, errors.New("Cannot find Crowbar")
+		return errors.New("Cannot find Crowbar")
 	}
 	path = repo.Path()
 	parent := filepath.Dir(path)
 	// If this is a raw repo, recurse and keep looking.
 	if repo.IsRaw() {
-		res, err = findCrowbar(parent)
-		return
+		return findCrowbar(parent)
 	}
 	// See if we have something that looks like a crowbar repo here.
 	stat, err := os.Stat(filepath.Join(path, "barclamps"))
 	if err != nil || !stat.IsDir() {
-		res, err = findCrowbar(parent)
-		return
+		return findCrowbar(parent)
 	}
-	// We do.  Populate the crowbar struct.
-	res = &Crowbar{
-		Repo:      repo,
-		Barclamps: make(map[string]*git.Repo),
-		Remotes:   make(map[string]*Remote),
-	}
+	// We do.  Start populating our stuff.
+	Repo = repo
+	Barclamps = make(map[string]*git.Repo)
+	Remotes = make(map[string]*Remote)
 	dirs, err := ioutil.ReadDir(filepath.Join(path, "barclamps"))
 	dieIfError(err)
 	// populate our list of barclamps
@@ -168,21 +161,21 @@ func findCrowbar(path string) (res *Crowbar, err error) {
 			log.Println(err)
 			continue
 		}
-		res.Barclamps[bc.Name()] = repo
+		Barclamps[bc.Name()] = repo
 	}
 	// populate remotes next
 
-	remotes := res.Repo.Find("crowbar.remote.")
+	remotes := Repo.Find("crowbar.remote.")
 	var rem *Remote
 	for k, v := range remotes {
 		parts := strings.Split(k, ".")
-		if res.Remotes[parts[2]] == nil {
+		if Remotes[parts[2]] == nil {
 			rem = new(Remote)
 			rem.Name = parts[2]
 			rem.Priority = 50 // default.
-			res.Remotes[parts[2]] = rem
+			Remotes[parts[2]] = rem
 		} else {
-			rem = res.Remotes[parts[2]]
+			rem = Remotes[parts[2]]
 		}
 		switch parts[3] {
 		case "priority":
@@ -194,46 +187,47 @@ func findCrowbar(path string) (res *Crowbar, err error) {
 			rem.Urlbase = v
 		}
 	}
-	res.Meta = new(FlatMetadata)
-	err = res.Meta.Probe(res)
+	meta := new(FlatMetadata)
+	err = meta.Probe()
 	if err != nil {
-		return nil, err
+		return err
 	}
-	MemoCrowbar = res
-	return res, nil
+	Meta = meta
+	return nil
 }
 
 // This is the same as findCrowbar, except we die if we cannot find Crowbar.
-func MustFindCrowbar(path string) *Crowbar {
-	res, err := findCrowbar(path)
-	dieIfError(err)
-	return res
+func MustFindCrowbar() {
+	if Meta == nil {
+		dieIfError(findCrowbar(""))
+	}
 }
+
 // Given a path, chop off the prefix if it matches the path to our working dir.
-func (c *Crowbar)RelPath(path string) string {
+func RelPath(path string) string {
 	return strings.TrimPrefix(filepath.Clean(path),
-		filepath.Clean(c.Repo.WorkDir) + "/")
+		filepath.Clean(Repo.WorkDir)+"/")
 }
 
 // Get all the releases we know about.
-func (c *Crowbar) Releases() ReleaseMap {
-	return c.Meta.Releases()
+func Releases() ReleaseMap {
+	return Meta.Releases()
 }
 
 // Get all of the builds we know how to build.
-func (c *Crowbar) Builds() BuildMap {
+func Builds() BuildMap {
 	res := make(BuildMap)
-	for _,rel := range c.Releases() {
-		for _,bld := range rel.Builds() {
-			res[bld.FullName()]=bld
+	for _, rel := range Releases() {
+		for _, bld := range rel.Builds() {
+			res[bld.FullName()] = bld
 		}
 	}
 	return res
 }
 
 // Get a specific release.
-func (c *Crowbar) Release(release string) Release {
-	rels := c.Releases()
+func GetRelease(release string) Release {
+	rels := Releases()
 	res, ok := rels[release]
 	if !ok {
 		log.Fatalf("%s is not a release!\n", release)
@@ -241,8 +235,38 @@ func (c *Crowbar) Release(release string) Release {
 	return res
 }
 
+func SplitRelease(from Release, to string) (res Release, err error) {
+	releases := Releases()
+	if _, found := releases[to]; found {
+		return nil, fmt.Errorf("Release %s already exists, cannot create it!\n", to)
+	}
+	newBranch := ReleaseBranch(to)
+	barclamps := from.Barclamps()
+	bases := make([]*git.Ref, 0, len(barclamps))
+	// Get all the refs we need to fork, or die.
+	for _, barclamp := range barclamps {
+		base, err := barclamp.Repo.Ref(barclamp.Branch)
+		if err != nil {
+			return nil, fmt.Errorf("Base ref %s for barclamp %s in source release %s does not exist!", from.Name(), barclamp.Name, barclamp.Branch)
+		}
+		if _, err = barclamp.Repo.Ref(newBranch); err == nil {
+			return nil, fmt.Errorf("%s already has a ref named %s", barclamp.Name, newBranch)
+		}
+		bases = append(bases, base)
+	}
+	// By now, all our base in all our barclamp are belong to us.
+	// Create new branches based on the base ref.
+	for _, base := range bases {
+		if _, err = base.Branch(newBranch); err != nil {
+			return nil, err
+		}
+	}
+	res, err = from.FinalizeSplit(to, newBranch)
+	return
+}
+
 // Given the name of a release, return what its git branch should be.
-func (c *Crowbar) ReleaseBranch(release string) string {
+func ReleaseBranch(release string) string {
 	parts := strings.Split(release, "/")
 	if len(parts) == 1 {
 		return "release/" + release + "/master"
@@ -255,9 +279,9 @@ func (c *Crowbar) ReleaseBranch(release string) string {
 }
 
 // Get all the release branches we care about, sorted by barclamp.
-func (c *Crowbar) AllBarclampBranches() (res map[string][]string) {
+func AllBarclampBranches() (res map[string][]string) {
 	res = make(map[string][]string)
-	for _, build := range c.Builds() {
+	for _, build := range Builds() {
 		for _, bc := range build.Barclamps() {
 			if res[bc.Name] == nil {
 				res[bc.Name] = make([]string, 0, 4)
@@ -270,24 +294,24 @@ func (c *Crowbar) AllBarclampBranches() (res map[string][]string) {
 
 // Get all the barclamp repos, return them in a map whose keys are in the
 // of "barclamp-" + the barclamp name.
-func (c *Crowbar) AllBarclampRepos() (res RepoMap) {
+func AllBarclampRepos() (res RepoMap) {
 	res = make(RepoMap)
-	for name, bc := range c.Barclamps {
+	for name, bc := range Barclamps {
 		res["barclamp-"+name] = bc
 	}
 	return res
 }
 
-func (c *Crowbar) AllOtherRepos() (res RepoMap) {
+func AllOtherRepos() (res RepoMap) {
 	res = make(RepoMap)
-	res["crowbar"] = c.Repo
+	res["crowbar"] = Repo
 	return res
 }
 
 // Get all of the repositories that make up Crowbar.
-func (c *Crowbar) AllRepos() (res RepoMap) {
-	res = c.AllBarclampRepos()
-	for k, v := range c.AllOtherRepos() {
+func AllRepos() (res RepoMap) {
+	res = AllBarclampRepos()
+	for k, v := range AllOtherRepos() {
 		res[k] = v
 	}
 	return res
@@ -456,8 +480,8 @@ func repoMapReduce(repos RepoMap, mapper repoMapper, reducer repoReducer) (ok bo
 }
 
 // Perform a git fetch across all the repositories.
-func (c *Crowbar) Fetch(remotes []string) (ok bool, results ResultTokens) {
-	repos := c.AllRepos()
+func Fetch(remotes []string) (ok bool, results ResultTokens) {
+	repos := AllRepos()
 	// mapper and reducer are the functions we will
 	// hand over to repoMapReduce.
 	// mapper is pretty simple, and doesn't really demonstrate
@@ -500,14 +524,14 @@ func (c *Crowbar) Fetch(remotes []string) (ok bool, results ResultTokens) {
 	// Now that all the setup is done, do it!
 	ok, results = repoMapReduce(repos, mapper, reducer)
 	// We do not care about the results of updating tracking branches here.
-	c.UpdateTrackingBranches()
+	UpdateTrackingBranches()
 	return
 }
 
 // See of all our git repositories are clean.
 // Clean means there are no uncommitted changes and no untracked files.
-func (c *Crowbar) IsClean() (ok bool, results ResultTokens) {
-	repos := c.AllRepos()
+func IsClean() (ok bool, results ResultTokens) {
+	repos := AllRepos()
 	mapper := func(name string, repo *git.Repo, res resultChan) {
 		ok, items := repo.IsClean()
 		tok := makeResultToken()
@@ -521,21 +545,21 @@ func (c *Crowbar) IsClean() (ok bool, results ResultTokens) {
 }
 
 // Get the current release that this repo set is working in.
-func (c *Crowbar) CurrentRelease() Release {
-	res, found := c.Repo.Get("crowbar.release")
+func CurrentRelease() Release {
+	res, found := Repo.Get("crowbar.release")
 	if found {
-		return c.Release(res)
+		return GetRelease(res)
 	}
 	return nil
 }
 
 // Get the current build that the repo set is working on.
-func (c *Crowbar) CurrentBuild() Build {
-	res, found := c.Repo.Get("crowbar.build")
+func CurrentBuild() Build {
+	res, found := Repo.Get("crowbar.build")
 	if !found {
 		return nil
 	}
-	builds := c.Builds()
+	builds := Builds()
 	build, found := builds[res]
 	if !found {
 		log.Fatalf("Current build %s does not exist!", res)
@@ -543,14 +567,14 @@ func (c *Crowbar) CurrentBuild() Build {
 	return build
 }
 
-func (c *Crowbar) setBuild(build Build) {
-	c.Repo.Set("crowbar.build", build.FullName())
-	c.Repo.Set("crowbar.release", build.Release().Name())
+func setBuild(build Build) {
+	Repo.Set("crowbar.build", build.FullName())
+	Repo.Set("crowbar.release", build.Release().Name())
 }
 
 // Rebase local changes on top of changes from upstream fetched by a Fetch.
-func (c *Crowbar) Rebase() (ok bool, res ResultTokens) {
-	repos := c.AllRepos()
+func Rebase() (ok bool, res ResultTokens) {
+	repos := AllRepos()
 	log.Println("Rebasing local branches on remote tracking branches")
 	mapper := func(name string, repo *git.Repo, res resultChan) {
 		tok := makeResultToken()
@@ -576,13 +600,13 @@ func (c *Crowbar) Rebase() (ok bool, res ResultTokens) {
 }
 
 // Get a list of barclamps in a specific Build.
-func (c *Crowbar) BarclampsInBuild(build Build) BarclampMap {
+func BarclampsInBuild(build Build) BarclampMap {
 	if build == nil {
 		log.Panicf("Cannot get barclamps of a nil Build!")
 	}
 	var res BarclampMap
 	if build.Parent() != nil {
-		res = c.BarclampsInBuild(build.Parent())
+		res = BarclampsInBuild(build.Parent())
 	} else {
 		res = make(BarclampMap)
 	}
@@ -628,11 +652,11 @@ func switchToEmptyBranch(r *git.Repo) error {
 
 // Switch the barclamps to the proper branches for a specific build.
 // Any barclamps not involved in the build will be set to the empty branch.
-func (c *Crowbar) Switch(build Build) (ok bool, res ResultTokens) {
-	newBarclamps := c.BarclampsInBuild(build)
+func Switch(build Build) (ok bool, res ResultTokens) {
+	newBarclamps := BarclampsInBuild(build)
 	// Build a map of barclamp name -> target branches
 	barclampTargets := make(map[string]string)
-	for name, _ := range c.Barclamps {
+	for name, _ := range Barclamps {
 		if _, found := newBarclamps[name]; found {
 			barclampTargets[name] = newBarclamps[name].Branch
 		} else {
@@ -661,9 +685,9 @@ func (c *Crowbar) Switch(build Build) (ok bool, res ResultTokens) {
 		}
 		res <- tok
 	}
-	ok, res = repoMapReduce(c.Barclamps, mapper, makeBasicReducer(len(barclampTargets)))
+	ok, res = repoMapReduce(Barclamps, mapper, makeBasicReducer(len(barclampTargets)))
 	if ok {
-		c.setBuild(build)
+		setBuild(build)
 		build.FinalizeSwitch()
 	}
 	return
