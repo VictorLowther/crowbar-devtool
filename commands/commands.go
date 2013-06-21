@@ -34,12 +34,12 @@ func addSubCommand(parent *commander.Commander, subcmd *commander.Commander) *co
 	return subcmd
 }
 
-func ShowCrowbar(cmd *commander.Command, args []string) {
+func showCrowbar(cmd *commander.Command, args []string) {
 	devtool.MustFindCrowbar()
 	log.Printf("Crowbar is located at: %s\n", devtool.Repo.Path())
 }
 
-func Fetch(cmd *commander.Command, args []string) {
+func fetch(cmd *commander.Command, args []string) {
 	devtool.MustFindCrowbar()
 	ok, _ := devtool.Fetch(nil)
 	if !ok {
@@ -48,12 +48,12 @@ func Fetch(cmd *commander.Command, args []string) {
 	log.Printf("All updates fetched.\n")
 }
 
-func Sync(cmd *commander.Command, args []string) {
+func sync(cmd *commander.Command, args []string) {
 	devtool.MustFindCrowbar()
 	ok, _ := devtool.IsClean()
 	if !ok {
 		log.Printf("Cannot rebase local changes, Crowbar is not clean.\n")
-		IsClean(cmd, args)
+		isClean(cmd, args)
 	}
 	ok, res := devtool.Rebase()
 	if ok {
@@ -67,7 +67,7 @@ func Sync(cmd *commander.Command, args []string) {
 	os.Exit(1)
 }
 
-func IsClean(cmd *commander.Command, args []string) {
+func isClean(cmd *commander.Command, args []string) {
 	devtool.MustFindCrowbar()
 	ok, items := devtool.IsClean()
 	if ok {
@@ -86,17 +86,17 @@ func IsClean(cmd *commander.Command, args []string) {
 	return
 }
 
-func CurrentRelease(cmd *commander.Command, args []string) {
+func currentRelease(cmd *commander.Command, args []string) {
 	devtool.MustFindCrowbar()
 	fmt.Println(devtool.CurrentRelease().Name())
 }
 
-func ShowBuild(cmd *commander.Command, args []string) {
+func showBuild(cmd *commander.Command, args []string) {
 	devtool.MustFindCrowbar()
 	fmt.Println(devtool.CurrentBuild().FullName())
 }
 
-func Releases(cmd *commander.Command, args []string) {
+func releases(cmd *commander.Command, args []string) {
 	devtool.MustFindCrowbar()
 	res := make([]string, 0, 20)
 	for release, _ := range devtool.Releases() {
@@ -108,7 +108,7 @@ func Releases(cmd *commander.Command, args []string) {
 	}
 }
 
-func Builds(cmd *commander.Command, args []string) {
+func builds(cmd *commander.Command, args []string) {
 	devtool.MustFindCrowbar()
 	res := make([]string, 0, 20)
 	if len(args) == 0 {
@@ -128,7 +128,7 @@ func Builds(cmd *commander.Command, args []string) {
 	}
 }
 
-func BarclampsInBuild(cmd *commander.Command, args []string) {
+func barclampsInBuild(cmd *commander.Command, args []string) {
 	devtool.MustFindCrowbar()
 	res := make([]string, 0, 20)
 	var build devtool.Build
@@ -151,7 +151,7 @@ func BarclampsInBuild(cmd *commander.Command, args []string) {
 	}
 }
 
-func Switch(cmd *commander.Command, args []string) {
+func switch_build(cmd *commander.Command, args []string) {
 	devtool.MustFindCrowbar()
 	if ok, _ := devtool.IsClean(); !ok {
 		log.Fatalln("Crowbar is not clean, cannot switch builds.")
@@ -197,12 +197,12 @@ func Switch(cmd *commander.Command, args []string) {
 	os.Exit(1)
 }
 
-func Update(cmd *commander.Command, args []string) {
-	Fetch(cmd, args)
-	Sync(cmd, args)
+func update(cmd *commander.Command, args []string) {
+	fetch(cmd, args)
+	sync(cmd, args)
 }
 
-func AddRemote(cmd *commander.Command, args []string) {
+func addRemote(cmd *commander.Command, args []string) {
 	remote := &devtool.Remote{Priority: 50}
 	switch len(args) {
 	case 1:
@@ -235,7 +235,7 @@ func AddRemote(cmd *commander.Command, args []string) {
 	os.Exit(0)
 }
 
-func ZapRemote(cmd *commander.Command, args []string) {
+func zapRemote(cmd *commander.Command, args []string) {
 	if len(args) != 1 {
 		log.Fatalf("remote rm only accepts one argument!\n")
 	}
@@ -247,7 +247,7 @@ func ZapRemote(cmd *commander.Command, args []string) {
 	devtool.ZapRemote(remote)
 }
 
-func ZapBuild(cmd *commander.Command, args []string) {
+func zapBuild(cmd *commander.Command, args []string) {
 	if len(args) != 1 {
 		log.Fatalf("remove-build only accepts one argument!\n")
 	}
@@ -272,7 +272,7 @@ func ZapBuild(cmd *commander.Command, args []string) {
 	log.Printf("Build %s deleted.\n",buildName)
 }
 
-func RemoveRelease(cmd *commander.Command, args []string) {
+func removeRelease(cmd *commander.Command, args []string) {
 	if len(args) != 1 {
 		log.Fatalf("remove-release only accepts one argument!")
 	}
@@ -292,7 +292,7 @@ func RemoveRelease(cmd *commander.Command, args []string) {
 	log.Printf("Release %s deleted.\n",releaseName)
 }
 
-func SplitRelease(cmd *commander.Command, args []string) {
+func splitRelease(cmd *commander.Command, args []string) {
 	if len(args) != 1 {
 		log.Fatalf("split-release only accepts one argument!")
 	}
@@ -304,7 +304,7 @@ func SplitRelease(cmd *commander.Command, args []string) {
 	}
 }
 
-func ShowRelease(cmd *commander.Command, args []string){
+func showRelease(cmd *commander.Command, args []string){
 	devtool.MustFindCrowbar()
 	if len(args) == 0 {
 		devtool.ShowRelease(devtool.CurrentRelease())
@@ -315,7 +315,7 @@ func ShowRelease(cmd *commander.Command, args []string){
 	}
 }
 
-func RenameRemote(cmd *commander.Command, args []string) {
+func renameRemote(cmd *commander.Command, args []string) {
 	if len(args) != 2 {
 		log.Fatalf("remote rename takes exactly 2 arguments.\n")
 	}
@@ -330,7 +330,7 @@ func RenameRemote(cmd *commander.Command, args []string) {
 	devtool.RenameRemote(remote, args[1])
 }
 
-func UpdateTracking(cmd *commander.Command, args []string) {
+func updateTracking(cmd *commander.Command, args []string) {
 	devtool.MustFindCrowbar()
 	ok, res := devtool.UpdateTrackingBranches()
 	if ok {
@@ -345,7 +345,7 @@ func UpdateTracking(cmd *commander.Command, args []string) {
 	os.Exit(1)
 }
 
-func ListRemotes(cmd *commander.Command, args []string) {
+func listRemotes(cmd *commander.Command, args []string) {
 	devtool.MustFindCrowbar()
 	for _, remote := range devtool.SortedRemotes() {
 		fmt.Printf("%s: urlbase=%s, priority=%d\n", remote.Name, remote.Urlbase, remote.Priority)
@@ -353,7 +353,7 @@ func ListRemotes(cmd *commander.Command, args []string) {
 	os.Exit(0)
 }
 
-func ShowRemote(cmd *commander.Command, args []string) {
+func showRemote(cmd *commander.Command, args []string) {
 	devtool.MustFindCrowbar()
 	if len(args) != 1 {
 		log.Fatal("Need exactly 1 argument.")
@@ -366,12 +366,12 @@ func ShowRemote(cmd *commander.Command, args []string) {
 	os.Exit(0)
 }
 
-func SyncRemotes(cmd *commander.Command, args []string) {
+func syncRemotes(cmd *commander.Command, args []string) {
 	devtool.MustFindCrowbar()
 	devtool.SyncRemotes()
 }
 
-func SetRemoteURLBase(cmd *commander.Command, args []string) {
+func setRemoteURLBase(cmd *commander.Command, args []string) {
 	devtool.MustFindCrowbar()
 	if len(args) != 2 {
 		log.Fatal("Need exactly 2 arguments")
@@ -390,7 +390,7 @@ func init() {
 	}
 	// Core Crowbar commands.
 	addCommand(nil, &commander.Command{
-		Run:       IsClean,
+		Run:       isClean,
 		UsageLine: "clean?",
 		Short:     "Shows whether Crowbar overall is clean.",
 		Long: `Show whether or not all of the repositories that are part of this
@@ -399,52 +399,52 @@ code. If they are not, this command shows what is dirty in each repository,
 and exits with an exit code of 1.`,
 	})
 	addCommand(nil, &commander.Command{
-		Run:       Releases,
+		Run:       releases,
 		UsageLine: "releases",
 		Short:     "Shows the releases available to work on.",
 	})
 	addCommand(nil, &commander.Command{
-		Run:       BarclampsInBuild,
+		Run:       barclampsInBuild,
 		UsageLine: "barclamps-in-build [build]",
 		Short:     "Shows the releases available to work on.",
 	})
 	addCommand(nil, &commander.Command{
-		Run:       Builds,
+		Run:       builds,
 		UsageLine: "builds",
 		Short:     "Shows the builds in a release or releases.",
 	})
 	addCommand(nil, &commander.Command{
-		Run:       ShowBuild,
+		Run:       showBuild,
 		UsageLine: "branch",
 		Short:     "Shows the current branch",
 	})
 	addCommand(nil, &commander.Command{
-		Run:       ShowCrowbar,
+		Run:       showCrowbar,
 		UsageLine: "show",
 		Short:     "Shows the location of the top level Crowbar repo",
 	})
 	addCommand(nil, &commander.Command{
-		Run:       Fetch,
+		Run:       fetch,
 		UsageLine: "fetch",
 		Short:     "Fetches updates from all remotes",
 	})
 	addCommand(nil, &commander.Command{
-		Run:       Sync,
+		Run:       sync,
 		UsageLine: "sync",
 		Short:     "Rebase local changes on their tracked upstream changes.",
 	})
 	addCommand(nil, &commander.Command{
-		Run:       Switch,
+		Run:       switch_build,
 		UsageLine: "switch [build or release]",
 		Short:     "Switch to the named release or build",
 	})
 	addCommand(nil, &commander.Command{
-		Run:       Update,
+		Run:       update,
 		UsageLine: "update",
 		Short:     "Fetch all changes from upstream and then rebase local changes on top of them.",
 	})
 	addCommand(nil, &commander.Command{
-		Run: ZapBuild,
+		Run: zapBuild,
 		UsageLine: "remove-build [build]",
 		Short: "Remove a non-master build with no children.",
 	})
@@ -455,27 +455,27 @@ and exits with an exit code of 1.`,
 		Short: "Subcommands dealing with releases",
 	})
 	addCommand(release, &commander.Command{
-		Run: RemoveRelease,
+		Run: removeRelease,
 		UsageLine: "remove [release]",
 		Short: "Remove a release.",
 	})
 	addCommand(release, &commander.Command{
-		Run: SplitRelease,
+		Run: splitRelease,
 		UsageLine: "new [new-name]",
 		Short: "Create a new release from the current release.",
 	})
 	addCommand(release, &commander.Command{
-		Run:       CurrentRelease,
+		Run:       currentRelease,
 		UsageLine: "current",
 		Short:     "Shows the current release",
 	})
 	addCommand(release, &commander.Command{
-		Run:       Releases,
+		Run:       releases,
 		UsageLine: "list",
 		Short:     "Shows the releases available to work on.",
 	})
 	addCommand(release, &commander.Command{
-		Run:       ShowRelease,
+		Run:       showRelease,
 		UsageLine: "show",
 		Short:     "Shows details about the current or passed release",
 	})
@@ -486,42 +486,42 @@ and exits with an exit code of 1.`,
 		Short: "Subcommands dealing with remote manipulation",
 	})
 	addCommand(remote, &commander.Command{
-		Run:       UpdateTracking,
+		Run:       updateTracking,
 		UsageLine: "retrack",
 		Short:     "Update tracking references for all branches across all releases.",
 	})
 	addCommand(remote, &commander.Command{
-		Run:       ListRemotes,
+		Run:       listRemotes,
 		UsageLine: "list",
 		Short:     "List the remotes Crowbar is configured to use.",
 	})
 	addCommand(remote, &commander.Command{
-		Run:       ShowRemote,
+		Run:       showRemote,
 		UsageLine: "show [remote]",
 		Short:     "Show details about a specific remote",
 	})
 	addCommand(remote, &commander.Command{
-		Run:       AddRemote,
+		Run:       addRemote,
 		UsageLine: "add [remote] [URL] [priority]",
 		Short:     "Add a new remote",
 	})
 	addCommand(remote, &commander.Command{
-		Run:       ZapRemote,
+		Run:       zapRemote,
 		UsageLine: "rm [remote]",
 		Short:     "Remove a remote.",
 	})
 	addCommand(remote, &commander.Command{
-		Run:       RenameRemote,
+		Run:       renameRemote,
 		UsageLine: "rename [oldname] [newname]",
 		Short:     "Rename a remote.",
 	})
 	addCommand(remote, &commander.Command{
-		Run:       SetRemoteURLBase,
+		Run:       setRemoteURLBase,
 		UsageLine: "set-urlbase [remote] [urlbase]",
 		Short:     "Set a new URL for a remote.",
 	})
 	addCommand(remote, &commander.Command{
-		Run:       SyncRemotes,
+		Run:       syncRemotes,
 		UsageLine: "sync",
 		Short:     "Recalculate and synchronize remotes across all repositories.",
 	})
