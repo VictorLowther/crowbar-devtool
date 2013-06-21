@@ -77,7 +77,7 @@ func (r *FlatRelease) SetParent(target *FlatRelease) error {
 	if err := cmd.Run(); err != nil {
 		return err
 	}
-	commitmsg := fmt.Sprint("Set parent of %s to %s", r.name, target.name)
+	commitmsg := fmt.Sprintf("Set parent of %s to %s", r.name, target.name)
 	cmd, _, _ = Repo.Git("commit", "-m", commitmsg)
 	if err := cmd.Run(); err != nil {
 		return err
