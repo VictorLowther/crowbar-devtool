@@ -13,21 +13,23 @@ import (
 	"strings"
 )
 
-// Placeholder for a barclamp.
-// Barclamps are leaf nodes from the point of view of the
-// release branching stricture.
+// Barclamp is the type that is at the leaf node of the release tracking
+// tree.  All metadata types should share the same barclamp struct, so
+// we do not hide it behind an interface like we do with the Build, Release,
+// and Metadata types.
 type Barclamp struct {
 	// All barclamps have to have a name.
 	Name string
-	// This is the branch in git that the barclamp should
-	// be checked out to for a build.
+	// This is the branch in git that shoul be checked out for a build.
 	Branch string
 	// The git repo that holds the actual code for the barclamp.
 	Repo *git.Repo
 }
 
+// BarclampMap maps barclamp names to pointers to barclamps.
 type BarclampMap map[string]*Barclamp
 
+// RepoMap maps repository named to pointers to git repositories.
 type RepoMap map[string]*git.Repo
 
 // A Build is a bundle of barclamps in a release that
@@ -53,14 +55,15 @@ type Build interface {
 	// Perform whatver metadata-specific tasks are needed to
 	// finaize a switch operation.
 	FinalizeSwitch()
-	// Remove a  build.  The build must not be named "master", and the
-	// build must not have any children.
+	// Remove a build.  The build must not be named "master", and the
+	// build must not have any children. 
 	Zap() error
 }
 
+// BuildMap maps build names to types that satisfy the Build interface.
 type BuildMap map[string]Build
 
-// A Release is a stream of development for Crowbar.
+// Release is a stream of development for Crowbar.
 // At any given time we may have multiple Releases.
 // A Release consists of a collection of related builds.
 type Release interface {
@@ -71,7 +74,8 @@ type Release interface {
 	// The parent of this release.
 	// We may return nil if there is no parent.
 	Parent() Release
-	// Remove a release.  You cannot remove the development release.
+	// Remove metadata for a release.  The branches in the
+	// barclamps should be removed before Zapping the release.
 	Zap() error
 	// All the barclamps in a release
 	Barclamps() BarclampMap
@@ -79,9 +83,10 @@ type Release interface {
 	FinalizeSplit(string, string) (Release, error)
 }
 
+// ReleaseMap maps release names to releases.
 type ReleaseMap map[string]Release
 
-// A Metadata allows the rest of Crowbar to know what releases and builds
+// Metadata allows the rest of Crowbar to know what releases and builds
 // are available, and (a little later) modify it.  The reason this
 // and the above are interfaces is to allow for having multiple ways to
 // store the release metadata.
@@ -92,16 +97,24 @@ type Metadata interface {
 	Probe() error
 }
 
-// Track the priority of a Crowbar remote.
+// Remote tracks the common parts of git remotes across the various
+// Crowbar repositories, and provides a mechanism for sorting them.
 type Remote struct {
 	Priority      int
 	Urlbase, Name string
 }
 
 var (
+	// Repo points at the top-level Crowbar git repository.
 	Repo      *git.Repo
+	// Barclamps tracks all the barclamps that this crowbar checkout
+	// knows about.
 	Barclamps RepoMap
+	// Remotes tracks all the remotes that are configured
+	// in the git metadata for this Crowbar checkout.
 	Remotes   map[string]*Remote
+	// Meta holds a reference to the metadata for this Crowbar checkout.
+	// This may turn into a slice in the future.
 	Meta      Metadata
 )
 
@@ -280,18 +293,18 @@ func Fetch(remotes []string) (ok bool, results ResultTokens) {
 	reducer := func(vals resultChan) (bool, ResultTokens) {
 		ok := true
 		res := make(ResultTokens, len(repos), len(repos))
-		for i, _ := range res {
+		for i := range res {
 			item := <-vals
 			res[i] = item
 			if item.OK {
 				log.Printf("Fetched all updates for %s\n", item.Name)
 			} else {
 				log.Printf("Failed to fetch all changes for %s:\n", item.Name)
-				fetch_results, cast_ok := item.Results.(git.FetchMap)
-				if !cast_ok {
+				fetchResults, castOK := item.Results.(git.FetchMap)
+				if !castOK {
 					log.Panicf("Could not cast fetch results for %s into git.FetchMap\n", item.Name)
 				}
-				for k, v := range fetch_results {
+				for k, v := range fetchResults {
 					if !v {
 						log.Printf("\tRemote %s failed\n", k)
 					}
@@ -427,7 +440,7 @@ func Switch(build Build) (ok bool, res ResultTokens) {
 	newBarclamps := BarclampsInBuild(build)
 	// Build a map of barclamp name -> target branches
 	barclampTargets := make(map[string]string)
-	for name, _ := range Barclamps {
+	for name := range Barclamps {
 		if _, found := newBarclamps[name]; found {
 			barclampTargets[name] = newBarclamps[name].Branch
 		} else {

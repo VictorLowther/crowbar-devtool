@@ -125,7 +125,7 @@ func makeBasicReducer(items int) repoReducer {
 	return func(vals resultChan) (ok bool, res ResultTokens) {
 		res = make(ResultTokens, items, items)
 		ok = true
-		for i, _ := range res {
+		for i := range res {
 			item := <-vals
 			ok = ok && item.OK
 			res[i] = item
@@ -154,7 +154,7 @@ func repoMapReduce(repos RepoMap, mapper repoMapper, reducer repoReducer) (ok bo
 			go t.rollback(crChan)
 		}
 	}
-	for _, _ = range res {
+	for _ = range res {
 		crOK = (<-crChan) && crOK
 	}
 	if !crOK {

@@ -100,7 +100,7 @@ func ShowRelease(rel Release) {
 	}
 	fmt.Printf("Default Branch: %s\n", ReleaseBranch(rel.Name()))
 	fmt.Printf("Builds:\n")
-	for name,_ := range rel.Builds() {
+	for name := range rel.Builds() {
 		fmt.Printf("\t%s\n",name)
 	}
 }

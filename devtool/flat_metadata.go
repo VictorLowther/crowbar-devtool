@@ -63,9 +63,8 @@ func (r *FlatRelease) lookupParent() (res *FlatRelease) {
 	func (r *FlatRelease) Parent() Release {
 	if parent := r.lookupParent(); parent == nil {
 		return nil
-	} else {
-		return Release(parent)
 	}
+	return Release(parent)
 }
 
 // Sets target to be the new parent of r.
@@ -258,8 +257,8 @@ func (b *FlatBuild) Zap() error {
 			return fmt.Errorf("Cannot delete build with active children!")
 		}
 	}
-	cb_path := filepath.Clean(Repo.WorkDir) + "/"
-	relpath := strings.TrimPrefix(b.path(), cb_path)
+	cbPath := filepath.Clean(Repo.WorkDir) + "/"
+	relpath := strings.TrimPrefix(b.path(), cbPath)
 	cmd, _, _ := Repo.Git("rm", "-rf", relpath)
 	if err := cmd.Run(); err != nil {
 		return err
