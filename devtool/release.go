@@ -56,6 +56,9 @@ func SplitRelease(from Release, to string) (res Release, err error) {
 func ReleaseBranch(release string) string {
 	parts := strings.Split(release, "/")
 	if len(parts) == 1 {
+		if release == "development" {
+			return "master"
+		}
 		return "release/" + release + "/master"
 	} else if len(parts) == 2 && parts[0] == "feature" {
 		return "feature/" + parts[1] + "/master"
@@ -74,15 +77,30 @@ func CurrentRelease() Release {
 	return nil
 }
 
+// Remove a release.  Has no warnings or sanity checking.
 func RemoveRelease(rel Release) error {
-	if rel == CurrentRelease() {
-		return fmt.Errorf("Cannot remove current release %s",rel.Name())
+	if rel.Name() == CurrentRelease().Name() {
+		return fmt.Errorf("Cannot remove current release %s", rel.Name())
 	}
-	for _,barclamp := range rel.Barclamps() {
-		cmd,_,_ := barclamp.Repo.Git("branch","-D",barclamp.Branch)
+	for _, barclamp := range rel.Barclamps() {
+		cmd, _, _ := barclamp.Repo.Git("branch", "-D", barclamp.Branch)
 		if cmd.Run() != nil {
-			return fmt.Errorf("Failed to remove release branch %s from %s",barclamp.Branch,barclamp.Name)
+			return fmt.Errorf("Failed to remove release branch %s from %s", barclamp.Branch, barclamp.Name)
 		}
 	}
 	return rel.Zap()
+}
+
+// Shows some useful information about a release.
+func ShowRelease(rel Release) {
+	fmt.Printf("Release: %s\n", rel.Name())
+	parent := rel.Parent()
+	if parent != nil {
+		fmt.Printf("Parent: %s\n", parent.Name())
+	}
+	fmt.Printf("Default Branch: %s\n", ReleaseBranch(rel.Name()))
+	fmt.Printf("Builds:\n")
+	for name,_ := range rel.Builds() {
+		fmt.Printf("\t%s\n",name)
+	}
 }

@@ -60,8 +60,12 @@ func (r *FlatRelease) lookupParent() (res *FlatRelease) {
 
 // Find the parent release of this release.
 // If there isn't one, return nil.
-func (r *FlatRelease) Parent() Release {
-	return Release(r.lookupParent())
+	func (r *FlatRelease) Parent() Release {
+	if parent := r.lookupParent(); parent == nil {
+		return nil
+	} else {
+		return Release(parent)
+	}
 }
 
 // Sets target to be the new parent of r.

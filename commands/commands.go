@@ -86,7 +86,7 @@ func IsClean(cmd *commander.Command, args []string) {
 	return
 }
 
-func ShowRelease(cmd *commander.Command, args []string) {
+func CurrentRelease(cmd *commander.Command, args []string) {
 	devtool.MustFindCrowbar()
 	fmt.Println(devtool.CurrentRelease().Name())
 }
@@ -304,6 +304,17 @@ func SplitRelease(cmd *commander.Command, args []string) {
 	}
 }
 
+func ShowRelease(cmd *commander.Command, args []string){
+	devtool.MustFindCrowbar()
+	if len(args) == 0 {
+		devtool.ShowRelease(devtool.CurrentRelease())
+	} else {
+		for _,rel := range args {
+			devtool.ShowRelease(devtool.GetRelease(rel))
+		}
+	}
+}
+
 func RenameRemote(cmd *commander.Command, args []string) {
 	if len(args) != 2 {
 		log.Fatalf("remote rename takes exactly 2 arguments.\n")
@@ -454,7 +465,7 @@ and exits with an exit code of 1.`,
 		Short: "Create a new release from the current release.",
 	})
 	addCommand(release, &commander.Command{
-		Run:       ShowRelease,
+		Run:       CurrentRelease,
 		UsageLine: "current",
 		Short:     "Shows the current release",
 	})
@@ -462,6 +473,11 @@ and exits with an exit code of 1.`,
 		Run:       Releases,
 		UsageLine: "list",
 		Short:     "Shows the releases available to work on.",
+	})
+	addCommand(release, &commander.Command{
+		Run:       ShowRelease,
+		UsageLine: "show",
+		Short:     "Shows details about the current or passed release",
 	})
 
 	// Remote Management commands.
