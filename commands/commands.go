@@ -272,7 +272,7 @@ func ZapBuild(cmd *commander.Command, args []string) {
 	log.Printf("Build %s deleted.\n",buildName)
 }
 
-func ZapRelease(cmd *commander.Command, args []string) {
+func RemoveRelease(cmd *commander.Command, args []string) {
 	if len(args) != 1 {
 		log.Fatalf("remove-release only accepts one argument!")
 	}
@@ -286,7 +286,7 @@ func ZapRelease(cmd *commander.Command, args []string) {
 	if releaseName == "development" {
 		log.Fatal("Cannot delete the development release.")
 	}
-	if err := release.Zap(); err != nil {
+	if err := devtool.RemoveRelease(release); err != nil {
 		log.Fatal(err)
 	}
 	log.Printf("Release %s deleted.\n",releaseName)
@@ -403,11 +403,6 @@ and exits with an exit code of 1.`,
 		Short:     "Shows the builds in a release or releases.",
 	})
 	addCommand(nil, &commander.Command{
-		Run:       ShowRelease,
-		UsageLine: "release",
-		Short:     "Shows the current release",
-	})
-	addCommand(nil, &commander.Command{
 		Run:       ShowBuild,
 		UsageLine: "branch",
 		Short:     "Shows the current branch",
@@ -442,15 +437,31 @@ and exits with an exit code of 1.`,
 		UsageLine: "remove-build [build]",
 		Short: "Remove a non-master build with no children.",
 	})
-	addCommand(nil, &commander.Command{
-		Run: ZapRelease,
-		UsageLine: "remove-release [release]",
-		Short: "Remove a release",
+
+	// Release Handling commands
+	release := addSubCommand(nil,&commander.Commander{
+		Name: "release",
+		Short: "Subcommands dealing with releases",
 	})
-	addCommand(nil, &commander.Command{
+	addCommand(release, &commander.Command{
+		Run: RemoveRelease,
+		UsageLine: "remove [release]",
+		Short: "Remove a release.",
+	})
+	addCommand(release, &commander.Command{
 		Run: SplitRelease,
-		UsageLine: "new-release [new-name]",
+		UsageLine: "new [new-name]",
 		Short: "Create a new release from the current release.",
+	})
+	addCommand(release, &commander.Command{
+		Run:       ShowRelease,
+		UsageLine: "current",
+		Short:     "Shows the current release",
+	})
+	addCommand(release, &commander.Command{
+		Run:       Releases,
+		UsageLine: "list",
+		Short:     "Shows the releases available to work on.",
 	})
 
 	// Remote Management commands.

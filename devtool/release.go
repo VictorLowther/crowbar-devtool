@@ -73,3 +73,16 @@ func CurrentRelease() Release {
 	}
 	return nil
 }
+
+func RemoveRelease(rel Release) error {
+	if rel == CurrentRelease() {
+		return fmt.Errorf("Cannot remove current release %s",rel.Name())
+	}
+	for _,barclamp := range rel.Barclamps() {
+		cmd,_,_ := barclamp.Repo.Git("branch","-D",barclamp.Branch)
+		if cmd.Run() != nil {
+			return fmt.Errorf("Failed to remove release branch %s from %s",barclamp.Branch,barclamp.Name)
+		}
+	}
+	return rel.Zap()
+}
