@@ -9,15 +9,15 @@ import (
 	"log"
 	"os"
 	"sort"
-	"strings"
 	"strconv"
+	"strings"
 )
 
-var base_command *c.Commander
+var baseCommand *c.Commander
 
 func addCommand(parent *c.Commander, cmd *c.Command) {
 	if parent == nil {
-		parent = base_command
+		parent = baseCommand
 	}
 	parent.Commands = append(parent.Commands, cmd)
 	return
@@ -25,7 +25,7 @@ func addCommand(parent *c.Commander, cmd *c.Command) {
 
 func addSubCommand(parent *c.Commander, subcmd *c.Commander) *c.Commander {
 	if parent == nil {
-		parent = base_command
+		parent = baseCommand
 	}
 	subcmd.Parent = parent
 	subcmd.Commands = make([]*c.Command, 0, 2)
@@ -99,7 +99,7 @@ func showBuild(cmd *c.Command, args []string) {
 func releases(cmd *c.Command, args []string) {
 	dev.MustFindCrowbar()
 	res := make([]string, 0, 20)
-	for release, _ := range dev.Releases() {
+	for release := range dev.Releases() {
 		res = append(res, release)
 	}
 	sort.Strings(res)
@@ -112,12 +112,12 @@ func builds(cmd *c.Command, args []string) {
 	dev.MustFindCrowbar()
 	res := make([]string, 0, 20)
 	if len(args) == 0 {
-		for build, _ := range dev.CurrentRelease().Builds() {
+		for build := range dev.CurrentRelease().Builds() {
 			res = append(res, dev.CurrentRelease().Name()+"/"+build)
 		}
 	} else {
 		for _, release := range args {
-			for build, _ := range dev.GetRelease(release).Builds() {
+			for build := range dev.GetRelease(release).Builds() {
 				res = append(res, release+"/"+build)
 			}
 		}
@@ -142,7 +142,7 @@ func barclampsInBuild(cmd *c.Command, args []string) {
 			log.Fatalln("No such build %s", args[0])
 		}
 	}
-	for name, _ := range dev.BarclampsInBuild(build) {
+	for name := range dev.BarclampsInBuild(build) {
 		res = append(res, name)
 	}
 	sort.Strings(res)
@@ -151,7 +151,7 @@ func barclampsInBuild(cmd *c.Command, args []string) {
 	}
 }
 
-func switch_build(cmd *c.Command, args []string) {
+func switchBuild(cmd *c.Command, args []string) {
 	dev.MustFindCrowbar()
 	if ok, _ := dev.IsClean(); !ok {
 		log.Fatalln("Crowbar is not clean, cannot switch builds.")
@@ -165,8 +165,8 @@ func switch_build(cmd *c.Command, args []string) {
 		target, found = current, true
 	case 1:
 		// Were we passed a known release?
-		rel, found_rel := rels[args[0]]
-		if found_rel {
+		rel, foundRel := rels[args[0]]
+		if foundRel {
 			for _, build := range []string{current.Name(), "master"} {
 				target, found = rel.Builds()[build]
 				if found {
@@ -253,23 +253,23 @@ func zapBuild(cmd *c.Command, args []string) {
 	}
 	buildName := args[0]
 	dev.MustFindCrowbar()
-	if !strings.Contains(buildName,"/") {
+	if !strings.Contains(buildName, "/") {
 		// We were passed what appears to be a raw build name.
 		// Turn it into a real build by prepending the release name.
-			buildName = dev.CurrentRelease().Name() + "/" + buildName
+		buildName = dev.CurrentRelease().Name() + "/" + buildName
 	}
 	builds := dev.Builds()
-	build,found := builds[buildName]
+	build, found := builds[buildName]
 	if !found {
-		log.Fatalf("%s is not a build, cannot delete it!",buildName)
+		log.Fatalf("%s is not a build, cannot delete it!", buildName)
 	}
-	if strings.HasSuffix(buildName,"/master") {
+	if strings.HasSuffix(buildName, "/master") {
 		log.Fatalf("Cannot delete the master build in a release!")
 	}
 	if err := build.Zap(); err != nil {
 		log.Fatal(err)
 	}
-	log.Printf("Build %s deleted.\n",buildName)
+	log.Printf("Build %s deleted.\n", buildName)
 }
 
 func removeRelease(cmd *c.Command, args []string) {
@@ -279,9 +279,9 @@ func removeRelease(cmd *c.Command, args []string) {
 	dev.MustFindCrowbar()
 	releaseName := args[0]
 	releases := dev.Releases()
-	release,found := releases[releaseName]
+	release, found := releases[releaseName]
 	if !found {
-		log.Fatalf("%s is not a release!\n",releaseName)
+		log.Fatalf("%s is not a release!\n", releaseName)
 	}
 	if releaseName == "development" {
 		log.Fatal("Cannot delete the development release.")
@@ -289,7 +289,7 @@ func removeRelease(cmd *c.Command, args []string) {
 	if err := dev.RemoveRelease(release); err != nil {
 		log.Fatal(err)
 	}
-	log.Printf("Release %s deleted.\n",releaseName)
+	log.Printf("Release %s deleted.\n", releaseName)
 }
 
 func splitRelease(cmd *c.Command, args []string) {
@@ -298,18 +298,18 @@ func splitRelease(cmd *c.Command, args []string) {
 	}
 	dev.MustFindCrowbar()
 	current := dev.CurrentRelease()
-	if _,err := dev.SplitRelease(current,args[0]); err != nil {
+	if _, err := dev.SplitRelease(current, args[0]); err != nil {
 		log.Println(err)
-		log.Fatalf("Could not split new release %s from %s",args[0],current.Name())
+		log.Fatalf("Could not split new release %s from %s", args[0], current.Name())
 	}
 }
 
-func showRelease(cmd *c.Command, args []string){
+func showRelease(cmd *c.Command, args []string) {
 	dev.MustFindCrowbar()
 	if len(args) == 0 {
 		dev.ShowRelease(dev.CurrentRelease())
 	} else {
-		for _,rel := range args {
+		for _, rel := range args {
 			dev.ShowRelease(dev.GetRelease(rel))
 		}
 	}
@@ -384,7 +384,7 @@ func setRemoteURLBase(cmd *c.Command, args []string) {
 }
 
 func init() {
-	base_command = &c.Commander{
+	baseCommand = &c.Commander{
 		Name: "dev",
 		Flag: flag.NewFlagSet("dev", flag.ExitOnError),
 	}
@@ -434,7 +434,7 @@ and exits with an exit code of 1.`,
 		Short:     "Rebase local changes on their tracked upstream changes.",
 	})
 	addCommand(nil, &c.Command{
-		Run:       switch_build,
+		Run:       switchBuild,
 		UsageLine: "switch [build or release]",
 		Short:     "Switch to the named release or build",
 	})
@@ -444,25 +444,25 @@ and exits with an exit code of 1.`,
 		Short:     "Fetch all changes from upstream and then rebase local changes on top of them.",
 	})
 	addCommand(nil, &c.Command{
-		Run: zapBuild,
+		Run:       zapBuild,
 		UsageLine: "remove-build [build]",
-		Short: "Remove a non-master build with no children.",
+		Short:     "Remove a non-master build with no children.",
 	})
 
 	// Release Handling commands
-	release := addSubCommand(nil,&c.Commander{
-		Name: "release",
+	release := addSubCommand(nil, &c.Commander{
+		Name:  "release",
 		Short: "Subcommands dealing with releases",
 	})
 	addCommand(release, &c.Command{
-		Run: removeRelease,
+		Run:       removeRelease,
 		UsageLine: "remove [release]",
-		Short: "Remove a release.",
+		Short:     "Remove a release.",
 	})
 	addCommand(release, &c.Command{
-		Run: splitRelease,
+		Run:       splitRelease,
 		UsageLine: "new [new-name]",
-		Short: "Create a new release from the current release.",
+		Short:     "Create a new release from the current release.",
 	})
 	addCommand(release, &c.Command{
 		Run:       currentRelease,
@@ -528,15 +528,15 @@ and exits with an exit code of 1.`,
 	return
 }
 
-// Main entry point for actually running a dev command.
+// Run is the main entry point for actually running a dev command.
 func Run() {
-	err := base_command.Flag.Parse(os.Args[1:])
+	err := baseCommand.Flag.Parse(os.Args[1:])
 	if err != nil {
 		fmt.Printf("**err**: %v\n", err)
 		os.Exit(1)
 	}
-	args := base_command.Flag.Args()
-	err = base_command.Run(args)
+	args := baseCommand.Flag.Args()
+	err = baseCommand.Run(args)
 	if err != nil {
 		fmt.Printf("**err**: %v\n", err)
 		os.Exit(1)
