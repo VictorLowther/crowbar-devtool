@@ -179,6 +179,7 @@ func (r *FlatRelease) FinalizeSplit(name, branch string) (Release, error) {
 	}
 	rel := r.meta.populateRelease(name)
 	r.meta.releases[name] = rel
+	rel.SetParent(r)
 	return Release(rel), nil
 }
 
