@@ -318,15 +318,6 @@ func (m *FlatMetadata) populateBuild(release *FlatRelease, name string) *FlatBui
 	for _, bc := range barclamps {
 		barclamp := &Barclamp{}
 		barclamp.Name = strings.TrimPrefix(bc, filepath.Join(bld, "barclamp-"))
-		if Barclamps[barclamp.Name] == nil {
-			log.Panicf("Build %s/%s wants %s, which is not in %s\n",
-				release.name,
-				build.name,
-				barclamp.Name,
-				filepath.Join(Repo.Path(),
-					"barclamps",
-					barclamp.Name))
-		}
 		barclamp.Repo = Barclamps[barclamp.Name]
 		branch, err := ioutil.ReadFile(bc)
 		if err != nil {

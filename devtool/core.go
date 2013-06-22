@@ -56,7 +56,7 @@ type Build interface {
 	// finaize a switch operation.
 	FinalizeSwitch()
 	// Remove a build.  The build must not be named "master", and the
-	// build must not have any children. 
+	// build must not have any children.
 	Zap() error
 }
 
@@ -106,16 +106,16 @@ type Remote struct {
 
 var (
 	// Repo points at the top-level Crowbar git repository.
-	Repo      *git.Repo
+	Repo *git.Repo
 	// Barclamps tracks all the barclamps that this crowbar checkout
 	// knows about.
 	Barclamps RepoMap
 	// Remotes tracks all the remotes that are configured
 	// in the git metadata for this Crowbar checkout.
-	Remotes   map[string]*Remote
+	Remotes map[string]*Remote
 	// Meta holds a reference to the metadata for this Crowbar checkout.
 	// This may turn into a slice in the future.
-	Meta      Metadata
+	Meta Metadata
 )
 
 // If e is of type error, log it as a fatal error and die.
@@ -400,6 +400,23 @@ func BarclampsInBuild(build Build) BarclampMap {
 	return res
 }
 
+func VerifyBarclamps(barclamps BarclampMap) error {
+	res := ""
+	for _, bc := range barclamps {
+		if bc.Repo == nil {
+			res += fmt.Sprintf("Missing barclamp %s\n", bc.Name)
+			continue
+		}
+		if _, err := bc.Repo.Ref(bc.Branch); err != nil {
+			res += fmt.Sprintf("Barclamp %s does not have branch %s", bc.Name, bc.Branch)
+		}
+	}
+	if res == "" {
+		return nil
+	}
+	return fmt.Errorf(res)
+}
+
 // Switch a repository to the empty branch, which will be created
 // if it does not exist.
 func switchToEmptyBranch(r *git.Repo) error {
@@ -438,7 +455,10 @@ func switchToEmptyBranch(r *git.Repo) error {
 // Any barclamps not involved in the build will be set to the empty branch.
 func Switch(build Build) (ok bool, res ResultTokens) {
 	newBarclamps := BarclampsInBuild(build)
-	// Build a map of barclamp name -> target branches
+	if err := VerifyBarclamps(newBarclamps); err != nil {
+		log.Print(err)
+		log.Fatalln("Please try running dev clone-barclamps to resolve this error.")
+	}
 	barclampTargets := make(map[string]string)
 	for name := range Barclamps {
 		if _, found := newBarclamps[name]; found {
