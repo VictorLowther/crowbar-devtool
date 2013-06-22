@@ -60,8 +60,9 @@ func (r *FlatRelease) lookupParent() (res *FlatRelease) {
 
 // Find the parent release of this release.
 // If there isn't one, return nil.
-	func (r *FlatRelease) Parent() Release {
-	if parent := r.lookupParent(); parent == nil {
+func (r *FlatRelease) Parent() Release {
+	parent := r.lookupParent()
+	if parent == nil {
 		return nil
 	}
 	return Release(parent)
@@ -140,7 +141,7 @@ func (r *FlatRelease) FinalizeSplit(name, branch string) (Release, error) {
 			if res != nil {
 				return res
 			}
-			res = os.Symlink(link,dest)
+			res = os.Symlink(link, dest)
 		case info.IsDir():
 			// Make the matching directory in the new release metadata.
 			res = os.MkdirAll(dest, os.FileMode(0755))

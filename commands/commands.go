@@ -128,6 +128,50 @@ func builds(cmd *c.Command, args []string) {
 	}
 }
 
+func localChanges(cmd *c.Command, args []string) {
+	dev.MustFindCrowbar()
+	switch len(args) {
+	case 0: dev.LocalChanges(dev.CurrentRelease())
+	case 1: dev.LocalChanges(dev.GetRelease(args[0]))
+	default: log.Fatalf("%s takes 0 or 1 release name!\n",cmd.Name())
+	}
+}
+
+func remoteChanges(cmd *c.Command, args []string) {
+	dev.MustFindCrowbar()
+	switch len(args) {
+	case 0: dev.RemoteChanges(dev.CurrentRelease())
+	case 1: dev.RemoteChanges(dev.GetRelease(args[0]))
+	default: log.Fatalf("%s takes 0 or 1 release name!\n",cmd.Name())
+	}
+}
+
+func crossReleaseChanges (cmd *c.Command, args []string) {
+	dev.MustFindCrowbar()
+	if len(args) != 2 {
+		log.Fatalf("%s takes exactly 2 release names!")
+	}
+	releases := new([2]dev.Release)
+	// Translate command line parameters.
+	// releases[0] will be the release with changes, and
+	// releases[1] will be the base release.
+	for i,name := range args {
+		switch name {
+		case "current": releases[i] = dev.CurrentRelease()
+		case "parent":
+			if i == 0 {
+				log.Fatalf("parent can only be the second arg to %s\n",cmd.Name())
+			}
+			releases[1] = releases[0].Parent()
+			if releases[1] == nil {
+				log.Fatalf("%s does not have a parent release.\n",releases[0].Name())
+			}
+		default: releases[i] = dev.GetRelease(name)
+		}
+	}
+	dev.CrossReleaseChanges(releases[0],releases[1])
+}
+
 func barclampsInBuild(cmd *c.Command, args []string) {
 	dev.MustFindCrowbar()
 	res := make([]string, 0, 20)
@@ -448,6 +492,16 @@ and exits with an exit code of 1.`,
 		UsageLine: "remove-build [build]",
 		Short:     "Remove a non-master build with no children.",
 	})
+	addCommand(nil, &c.Command{
+		Run:       localChanges,
+		UsageLine: "local-changes [release]",
+		Short:     "Show local changes that have not been comitted upstream.",
+	})
+	addCommand(nil, &c.Command{
+		Run:       remoteChanges,
+		UsageLine: "remote-changes [release]",
+		Short:     "Show changes that have been comitted upstream, but that are not present locally.",
+	})
 
 	// Release Handling commands
 	release := addSubCommand(nil, &c.Commander{
@@ -478,6 +532,11 @@ and exits with an exit code of 1.`,
 		Run:       showRelease,
 		UsageLine: "show",
 		Short:     "Shows details about the current or passed release",
+	})
+	addCommand(release, &c.Command{
+		Run: crossReleaseChanges,
+		UsageLine: "changes [target] [base]",
+		Short: "Show commits that are in the target release that are not in the base release.",
 	})
 
 	// Remote Management commands.

@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"github.com/VictorLowther/go-git/git"
 	"log"
+	"sort"
 	"strings"
 )
 
@@ -54,15 +55,18 @@ func SplitRelease(from Release, to string) (res Release, err error) {
 
 // Given the name of a release, return what its git branch should be.
 func ReleaseBranch(release string) string {
+	if release == "development" {
+		return "master"
+	}
 	parts := strings.Split(release, "/")
-	if len(parts) == 1 {
-		if release == "development" {
-			return "master"
-		}
+	switch {
+	case len(parts) == 1:
 		return "release/" + release + "/master"
-	} else if len(parts) == 2 && parts[0] == "feature" {
+	case len(parts) == 2 && parts[0] == "feature":
 		return "feature/" + parts[1] + "/master"
-	} else {
+	case len(parts) == 2 && parts[0] == "local":
+		return "local/" + parts[1] + "/master"
+	default:
 		log.Fatalf("%s is not a valid release name!\n", release)
 	}
 	return ""
@@ -101,6 +105,107 @@ func ShowRelease(rel Release) {
 	fmt.Printf("Default Branch: %s\n", ReleaseBranch(rel.Name()))
 	fmt.Printf("Builds:\n")
 	for name := range rel.Builds() {
-		fmt.Printf("\t%s\n",name)
+		fmt.Printf("\t%s\n", name)
 	}
+}
+
+type cherryRefs struct {
+	base, working         *git.Ref
+	baseName, workingName string
+}
+
+func showChanges(refs map[string]*cherryRefs) {
+	names := make([]string,0,10)
+	for name := range refs{
+		names = append(names,name)
+	}
+	sort.Strings(names)
+	noChanges := true
+	for _, name := range names {
+		r := refs[name]
+		changes, err := r.working.CherryLog(r.base)
+		if err != nil || (len(changes) == 0) {
+			continue
+		}
+		noChanges = false
+		fmt.Printf("\n%s: changes in %s compared to %s\n", name, r.workingName, r.baseName)
+		for _, change := range changes {
+			fmt.Printf("%s\n", change)
+		}
+	}
+	if noChanges {
+		fmt.Println("No unmerged changes")
+	}
+}
+
+func findLocalChangeRefs(rel Release) (refs map[string]*cherryRefs) {
+	barclamps := rel.Barclamps()
+	refs = make(map[string]*cherryRefs)
+	for name, barclamp := range barclamps {
+		localRef, err := barclamp.Repo.Ref(barclamp.Branch)
+		if err != nil {
+			continue
+		}
+		baseRef, err := localRef.TrackedRef()
+		if err != nil {
+			continue
+		}
+		refs["barclamp-"+name] = &cherryRefs{
+			base:        baseRef,
+			working:     localRef,
+			baseName:    "upstream",
+			workingName: "local",
+		}
+	}
+	return
+}
+
+// CrossReleaseChanges will find all commits in the target release that
+// are not present in the base release. It uses the same logic that git-cherry uses.
+func CrossReleaseChanges(target, base Release) {
+	baseBarclamps,targetBarclamps := base.Barclamps(), target.Barclamps()
+	commonNames := make([]string,0,10)
+	for name := range baseBarclamps {
+		if _,ok := targetBarclamps[name]; ok {
+			commonNames = append(commonNames,name)
+		}
+	}
+	refs := make(map[string]*cherryRefs)
+	for _,name := range commonNames {
+		a := baseBarclamps[name]
+		b := targetBarclamps[name]
+		aRef,err := a.Repo.Ref(a.Branch)
+		if err != nil {
+			continue
+		}
+		bRef,err := b.Repo.Ref(b.Branch)
+		if err != nil {
+			continue
+		}
+		refs["barclamp-"+name] = &cherryRefs{
+			base: aRef,
+			working: bRef,
+			baseName: base.Name(),
+			workingName: target.Name(),
+		}
+	}
+	showChanges(refs)
+}
+
+// LocalChanges shows any local changes to a release that have not
+// been comitted upstream.  It uses the same logic that git-cherry uses.
+func LocalChanges(rel Release) {
+	showChanges(findLocalChangeRefs(rel))
+}
+
+// RemoteChanges shows any remote changes to a release that have been
+// fetched but not merged into the local branches.
+// It uses the same logic that git-cherry uses.
+func RemoteChanges(rel Release) {
+	refs := findLocalChangeRefs(rel)
+	for _,r := range refs {
+		r.baseName, r.workingName = r.workingName, r.baseName
+		r.base, r.working = r.working, r.base
+	}
+	showChanges(refs)
 }
