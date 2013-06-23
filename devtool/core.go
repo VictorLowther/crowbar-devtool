@@ -461,6 +461,7 @@ func CloneBarclamps() {
 			log.Println(res.err)
 		}
 	}
+	SyncRemotes()
 }
 
 // Verify that all the barclamps we need for a build have been
