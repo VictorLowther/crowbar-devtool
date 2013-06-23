@@ -195,6 +195,11 @@ func barclampsInBuild(cmd *c.Command, args []string) {
 	}
 }
 
+func cloneBarclamps(cmd *c.Command, args []string) {
+	dev.MustFindCrowbar()
+	dev.CloneBarclamps()
+}
+
 func switchBuild(cmd *c.Command, args []string) {
 	dev.MustFindCrowbar()
 	if ok, _ := dev.IsClean(); !ok {
@@ -501,6 +506,11 @@ and exits with an exit code of 1.`,
 		Run:       remoteChanges,
 		UsageLine: "remote-changes [release]",
 		Short:     "Show changes that have been comitted upstream, but that are not present locally.",
+	})
+	addCommand(nil, &c.Command{
+		Run:       cloneBarclamps,
+		UsageLine: "clone-barclamps",
+		Short:     "Attempts to clone any missing barclamps.",
 	})
 
 	// Release Handling commands
