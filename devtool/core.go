@@ -400,6 +400,70 @@ func BarclampsInBuild(build Build) BarclampMap {
 	return res
 }
 
+// Clone any missing barclamps we may need.
+func CloneBarclamps() {
+	barclampsToClone := make(BarclampMap)
+	// Find all our missing barclamps
+	for _,release := range Meta.Releases() {
+		for _,barclamp := range release.Barclamps() {
+			if barclamp.Repo != nil {
+				continue
+			}
+			if _,ok := barclampsToClone[barclamp.Name]; ok {
+				continue
+			}
+			log.Printf("Need to clone %s\n",barclamp.Name)
+			barclampsToClone[barclamp.Name]=barclamp
+		}
+	}
+	if len(barclampsToClone) == 0 {
+		// Nothing to do, move along.
+		log.Println("No barclamps need to be cloned.")
+		return
+	}
+	type cloneRes struct {
+		name string
+		repo *git.Repo
+		err error
+	}
+	c := make(chan *cloneRes)
+	defer close(c)
+	cloner := func (name string, c chan *cloneRes) {
+		res := &cloneRes{name:name}
+		barclampPath := filepath.Join(Repo.Path(), "barclamps",name)
+		if _, err := os.Stat(barclampPath); err == nil {
+			res.err = fmt.Errorf("%s already exists, cowardly refusing to clone!", barclampPath)
+			c <- res
+			return
+		}
+		for _, remote := range SortedRemotes() {
+			source := remote.Urlbase + "/barclamp-" + name + ".git"
+			if found, _ := git.ProbeURL(source); !found {
+				continue
+			}
+			res.repo, res.err = git.Clone(source, barclampPath, "--origin", remote.Name)
+			c <- res
+			return
+		}
+		res.err = fmt.Errorf("Could not find barclamp %s at any known remotes!", name)
+		c <- res
+	}
+	for _,bc := range barclampsToClone {
+		go cloner(bc.Name,c)
+	}
+	for _,_ = range barclampsToClone {
+		res := <- c
+		if res.repo != nil {
+			barclampsToClone[res.name].Repo=res.repo
+			log.Printf("Cloned barclamp %s\n",res.name)
+		} else {
+			log.Println(res.err)
+		}
+	}
+}
+
+// Verify that all the barclamps we need for a build have been
+// cloned, and verify that the branches we need are present.
 func VerifyBarclamps(barclamps BarclampMap) error {
 	res := ""
 	for _, bc := range barclamps {
