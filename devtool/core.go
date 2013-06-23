@@ -455,6 +455,7 @@ func CloneBarclamps() {
 		res := <- c
 		if res.repo != nil {
 			barclampsToClone[res.name].Repo=res.repo
+			Barclamps[res.name]=res.repo
 			log.Printf("Cloned barclamp %s\n",res.name)
 		} else {
 			log.Println(res.err)
