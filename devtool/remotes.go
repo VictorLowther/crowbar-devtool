@@ -222,14 +222,14 @@ func SyncRemotes() {
 	for reponame, repo := range AllRepos() {
 		remotes := repo.Remotes()
 		for _, remote := range Remotes {
-			repopath := filepath.Join(remote.Urlbase, reponame)
+			repopath := remote.Urlbase + "/" + reponame
 			if url, found := remotes[remote.Name]; found {
 				continue
 			} else if found && url != repopath {
 				log.Printf("Remote %s in repo %s not pointing at proper URL.\n", remote.Name, reponame)
 				repo.ZapRemote(remote.Name)
 			}
-			if found, _ := repo.ProbeURL(repopath); found {
+			if found, _ := git.ProbeURL(repopath); found {
 				log.Printf("Adding new remote %s (%s) to %s\n", remote.Name, repopath, reponame)
 				repo.AddRemote(remote.Name, repopath)
 			} else {
