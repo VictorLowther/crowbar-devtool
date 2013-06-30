@@ -3,9 +3,11 @@ package commands
 import (
 	"fmt"
 	dev "github.com/VictorLowther/crowbar-devtool/devtool"
+	buildutils "github.com/VictorLowther/crowbar-devtool/build"
 	"github.com/VictorLowther/go-git/git"
 	c "github.com/gonuts/commander"
 	"github.com/gonuts/flag"
+	"path/filepath"
 	"log"
 	"os"
 	"sort"
@@ -432,6 +434,15 @@ func setRemoteURLBase(cmd *c.Command, args []string) {
 	dev.SetRemoteURLBase(remote, args[1])
 }
 
+func sanityCheckBuild(cmd *c.Command,args []string) {
+	dev.MustFindCrowbar()
+	paths := make([]string,0,0)
+	for _,bc := range dev.BarclampsInBuild(dev.CurrentBuild()){
+		paths = append(paths,filepath.Join(bc.Repo.Path(),"crowbar.yml"))
+	}
+	buildutils.SanityCheckMetadata(paths)
+}
+
 func init() {
 	baseCommand = &c.Commander{
 		Name: "dev",
@@ -511,6 +522,11 @@ and exits with an exit code of 1.`,
 		Run:       cloneBarclamps,
 		UsageLine: "clone-barclamps",
 		Short:     "Attempts to clone any missing barclamps.",
+	})
+	addCommand(nil, &c.Command{
+		Run:       sanityCheckBuild,
+		UsageLine: "build-sane",
+		Short:     "Sanity-check the build metadata for the current build.",
 	})
 
 	// Release Handling commands
