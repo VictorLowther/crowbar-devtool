@@ -476,7 +476,7 @@ func sanityCheckBuild(cmd *c.Command, args []string) error {
 
 func init() {
 	baseCommand = &c.Command{
-		UsageLine: "dev",
+		UsageLine: "crowbar-dev",
 		Flag:      *flag.NewFlagSet("dev", flag.ExitOnError),
 	}
 	// Core Crowbar commands.
